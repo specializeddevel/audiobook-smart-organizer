@@ -1,85 +1,121 @@
-# EbookSort - AI-Powered Audiobook Sorter
+# EbookSort - AI-Powered Audiobook Management Suite
 
-EbookSort is a Python script that automatically organizes your audiobook library. It takes a directory of unorganized audio files, intelligently groups them, fetches rich metadata using the Google Gemini API, and then sorts them into a clean, consistently-named `Author/Title` directory structure.
+EbookSort is a suite of Python scripts designed to automatically organize, tag, and manage your audiobook library. It transforms a folder of unorganized audio files into a clean, portable, and beautifully tagged collection.
 
-## Key Features
+## Core Features
 
-- **Automatic Grouping**: Intelligently groups loose audio files (e.g., `Book-Part1.mp3`, `Book-Part2.mp3`) into a single book entity for processing.
-- **AI-Powered Metadata**: Uses Google's Gemini API to fetch rich metadata for your audiobooks, including title, author, genre, series, year, and synopsis.
-- **Robust Cover Art Extraction**: Employs the powerful `mutagen` library to find and extract embedded cover art from a wide variety of formats (MP3, M4A, M4B, FLAC).
-- **Consistent Naming**: Automatically formats all generated author and title folders into `Title Case` for a clean and uniform library appearance.
-- **Rich Metadata Files**: For each book, it creates:
-    - A detailed `metadata.json` file containing all fetched info, plus processing date, file count, total size, and a list of original files.
-    - An extracted `cover.jpg` file if cover art is found.
-- **Master Inventory**: Generates and maintains a master `inventory.csv` file in your destination folder. This file is pipe-delimited for maximum compatibility and contains a full overview of your library.
-- **Smart Error Handling**:
-    - Moves unclassifiable books into an `unclassified` folder without crashing.
-    - Prevents errors from duplicate unclassified books by renaming new additions with a numerical suffix (e.g., `Book Title (2)`).
+- **Automatic Organization**: Intelligently groups loose audio files into book folders, named and structured by `Author/Title`.
+- **AI-Powered Metadata**: Uses the Google Gemini API to fetch rich metadata for your audiobooks, including title, author, genre, series, year, and a full synopsis.
+- **Rich Metadata Files**: For each book, it creates a `metadata.json` file with all fetched info and a `cover.jpg` file extracted from the audio.
+- **Embedded Tags & Cover Art**: Embeds all metadata and the cover image directly into each audio file (`.mp3`, `.m4a`, `.m4b`, `.flac`), ensuring your library is portable and looks great on any device.
+- **Master Inventory**: Generates and maintains a master `inventory.csv` file, perfect for viewing your library in a spreadsheet.
+- **Efficient & Smart**: Avoids re-processing books that have already been tagged, making updates fast.
 
-## How It Works
+---
 
-The script operates in two main phases:
+## Recommended Workflow
 
-1.  **Phase 1: Grouping**: The script scans the source directory and uses file names to guess which files belong to the same book. It moves these groups into temporary subfolders with standardized Title Case names.
-2.  **Phase 2: Classification**: It then processes each temporary folder, makes a single API call to Gemini to get the book's information, and moves the folder to its final, organized location (`Author/Title`), also in Title Case.
+1.  **Organize**: Run `ebooksort.py` on your messy folder to classify and sort your books into a new, clean library directory.
+2.  **Tag**: Run `write_tags.py` on the new library directory to embed all the metadata and cover art into the audio files. On subsequent runs, this will only tag new books you've added.
+3.  **Inventory (Optional)**: Run `generate_inventory.py` whenever you want an up-to-date spreadsheet of your entire collection.
 
-## Requirements
+---
 
-- Python 3.x
-- A Google Gemini API Key
+## The Scripts
+
+This project includes three main scripts that form a complete workflow.
+
+### 1. `ebooksort.py` - The Organizer
+
+This is the first script you should run. It takes a source directory of unorganized audio files, groups them into books, fetches their metadata via the Gemini API, and sorts them into a clean `Author/Title` directory structure.
+
+**Usage:**
+```bash
+# Basic usage (outputs to a new 'ebooks' folder)
+python ebooksort.py "C:\Path\To\Your\Unorganized\Audiobooks"
+
+# Specify a destination for the organized library
+python ebooksort.py "C:\Path\To\Audiobooks" -d "D:\My Organized Library"
+```
+
+### 2. `write_tags.py` - The Tagger
+
+This script reads the `metadata.json` and `cover.jpg` from each book folder and writes that information directly into the metadata tags of the audio files themselves.
+
+**Usage:**
+```bash
+# Run on your organized library to tag all new books
+python write_tags.py "D:\My Organized Library"
+
+# Force a re-tag of the entire library
+python write_tags.py "D:\My Organized Library" --force
+```
+
+### 3. `generate_inventory.py` - The Inventory Manager
+
+This script allows you to generate or regenerate the `inventory.csv` file for your library at any time. It scans all the `metadata.json` files in your organized library and creates a fresh, pipe-delimited (`|`) CSV file.
+
+**Usage:**
+```bash
+# Generate a new inventory.csv inside your library folder
+python generate_inventory.py "D:\My Organized Library"
+```
+
+---
 
 ## Setup
 
-1.  **Download the script and `requirements.txt` file.**
+### Requirements
+- Python 3.x
+- A Google Gemini API Key
 
-2.  **Install Dependencies:**
-    The script relies on a few external libraries. Install them by opening a terminal in the project's directory and running:
+### Installation
+1.  **Download the project files.**
+2.  **Install Dependencies:** Open a terminal in the project's directory and run:
     ```bash
     pip install -r requirements.txt
     ```
-
-3.  **Set Up Your API Key:**
-    The script requires a Google Gemini API key to be set as an environment variable.
+3.  **Set Up Your API Key:** The scripts require a Google Gemini API key to be set as an environment variable.
 
     **Windows:**
     ```cmd
     setx GOOGLE_API_KEY "YOUR_API_KEY_HERE"
     ```
-    (You may need to restart your terminal for this to take effect.)
+    *(You may need to restart your terminal for this to take effect.)*
 
     **Linux/macOS:**
     ```bash
     export GOOGLE_API_KEY="YOUR_API_KEY_HERE"
     ```
-    (To make this permanent, add the line to your `.bashrc` or `.zshrc` file.)
+    *(To make this permanent, add the line to your `.bashrc` or `.zshrc` file.)*
 
-## Usage
+---
 
-Run the script from your terminal, providing the path to your folder of unorganized audiobooks.
+## Technologies Used
 
-**Basic Usage:**
-```bash
-python ebooksort.py "C:\\Path\\To\\Your\\Audiobooks"
-```
-This will process the audiobooks and place them in a default folder named `ebooks` inside the current directory.
+*   **Python 3**: The core language for all scripts.
+*   **Google Gemini API**: Used for its powerful natural language processing to extract structured book metadata from simple filenames.
+*   **`mutagen`**: A robust Python library used for reading and writing audio metadata tags across multiple formats (ID3 for MP3, MP4 atoms for M4A/M4B, and Vorbis comments for FLAC).
+*   **`google-generativeai`**: The official Google client library for interacting with the Gemini API.
 
-**Specifying a Destination:**
-Use the `-d` or `--destination_directory` flag to specify a different output folder.
-```bash
-python ebooksort.py "C:\\Path\\To\\Your\\Audiobooks" -d "D:\\My Organized Library"
-```
+## Learning & Key Takeaways
 
-## The `inventory.csv` File
+This project served as a practical exercise in several key areas:
 
-In the root of your destination directory, the script creates and maintains an `inventory.csv` file. This file provides a complete, spreadsheet-friendly overview of your entire sorted library.
+*   **API Integration**: Interacting with a powerful third-party AI service to enrich local data.
+*   **File I/O and Management**: Systematically scanning, moving, and organizing files and directories.
+*   **Metadata Handling**: Deep-diving into the complexities and differences between audio tagging standards (ID3 vs. MP4 vs. Vorbis). The iterative process of fixing compatibility issues (e.g., the comment tag in AIMP) highlighted the importance of understanding how different applications interpret metadata.
+*   **Workflow Optimization**: Devising an efficient method (the `.tags_written` marker file) to prevent redundant processing in a large dataset, moving from a brute-force to a smart, incremental update strategy.
+*   **Modular Tooling**: Building a suite of small, focused scripts that work together, rather than a single monolithic application. This provides greater flexibility and maintainability.
 
-**Important:** This file uses a **pipe (`|`)** as a separator to avoid conflicts with commas in titles or synopses.
+---
 
-**How to Import into Google Sheets/Excel:**
-1.  Go to `File -> Import` or `Data -> From Text/CSV`.
-2.  Upload the `inventory.csv` file.
-3.  When prompted for a delimiter, choose **"Custom"** or **"Other"**.
-4.  Enter the pipe character (`|`) in the custom delimiter field.
-5.  Your data will now be correctly organized into columns.
+## Contributing
 
-The columns included are: `Title`, `Author`, `Genre`, `Series`, `Year`, `Synopsis`, `Path`, `ProcessingDate`, `FileCount`, `TotalSizeMB`, and `CoverArtFound`.
+Contributions are welcome! If you have ideas for new features, find a bug, or see an opportunity to improve the code or documentation, please feel free to open an issue or submit a pull request.
+
+## License
+
+This project is licensed under the **MIT License**.
+
+This means you are free to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software. The only requirement is to include the original copyright and permission notice in any substantial portions of the software.
