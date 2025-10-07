@@ -1,13 +1,12 @@
-# EbookSort - AI-Powered Audiobook Management Suite
+# AudioBookSort - AI-Powered Audiobook Management Suite
 
-EbookSort is a suite of Python scripts designed to automatically organize, tag, and manage your audiobook library. It transforms a folder of unorganized audio files into a clean, portable, and beautifully tagged collection.
+AudioBookSort is a suite of Python scripts designed to automatically organize, tag, and manage your audiobook library. It transforms a folder of unorganized audio files into a clean, portable, and beautifully tagged collection.
 
 ## Core Features
 
 - **Automatic Organization**: Intelligently groups loose audio files into book folders, named and structured by `Author/Title`.
 - **AI-Powered Metadata**: Uses the Google Gemini API to fetch rich metadata for your audiobooks, including title, author, genre, series, year, and a full synopsis.
-- **Rich Metadata Files**: For each book, it creates a `metadata.json` file with all fetched info and a `cover.jpg` file extracted from the audio.
-- **Embedded Tags & Cover Art**: Embeds all metadata and the cover image directly into each audio file (`.mp3`, `.m4a`, `.m4b`, `.flac`), ensuring your library is portable and looks great on any device.
+- **Advanced & Granular Tagging**: Embeds all metadata and cover art directly into each audio file (`.mp3`, `.m4a`, `.m4b`, `.flac`) with multiple modes for precise control over the tagging process.
 - **Master Inventory**: Generates and maintains a master `inventory.csv` file, perfect for viewing your library in a spreadsheet.
 - **Efficient & Smart**: Avoids re-processing books that have already been tagged, making updates fast.
 
@@ -16,7 +15,7 @@ EbookSort is a suite of Python scripts designed to automatically organize, tag, 
 ## Recommended Workflow
 
 1.  **Organize**: Run `ebooksort.py` on your messy folder to classify and sort your books into a new, clean library directory.
-2.  **Tag**: Run `write_tags.py` on the new library directory to embed all the metadata and cover art into the audio files. On subsequent runs, this will only tag new books you've added.
+2.  **Tag**: Run `write_tags.py` on the new library directory to embed all the metadata and cover art into the audio files. Use the different modes for granular control on subsequent runs.
 3.  **Inventory (Optional)**: Run `generate_inventory.py` whenever you want an up-to-date spreadsheet of your entire collection.
 
 ---
@@ -29,6 +28,13 @@ This project includes three main scripts that form a complete workflow.
 
 This is the first script you should run. It takes a source directory of unorganized audio files, groups them into books, fetches their metadata via the Gemini API, and sorts them into a clean `Author/Title` directory structure.
 
+> **Pro-Tip for Best Results:**
+> For the most accurate metadata retrieval, it is highly recommended to name your unorganized audio files with both the book title and the author. The script is very effective at parsing names like:
+> - `The Lord of the Rings - J.R.R. Tolkien.mp3`
+> - `J.R.R. Tolkien - The Hobbit.m4b`
+> - `A Game of Thrones by George R.R. Martin (Part 1).mp3`
+> - `The_Eye_of_the_World_Robert_Jordan.flac`
+
 **Usage:**
 ```bash
 # Basic usage (outputs to a new 'ebooks' folder)
@@ -38,17 +44,36 @@ python ebooksort.py "C:\Path\To\Your\Unorganized\Audiobooks"
 python ebooksort.py "C:\Path\To\Audiobooks" -d "D:\My Organized Library"
 ```
 
-### 2. `write_tags.py` - The Tagger
+### 2. `write_tags.py` - The Advanced Tagger
 
-This script reads the `metadata.json` and `cover.jpg` from each book folder and writes that information directly into the metadata tags of the audio files themselves.
+This script reads the `metadata.json` and `cover.jpg` from each book folder and writes that information directly into the metadata tags of the audio files. It offers several modes for precise control over the tagging process.
+
+**Tagging Modes**
+
+You can control the script's behavior using the `--mode` argument:
+
+*   `--mode smart` (Default)
+    *   Processes only new books that haven't been tagged before. It identifies them by looking for a `.tags_written` marker file in the book's folder.
+
+*   `--mode all`
+    *   Forces the re-tagging of the entire library. It re-writes **all text metadata and the cover art** for every book, ignoring any `.tags_written` markers.
+
+*   `--mode tags-only`
+    *   Forces the re-tagging of **only the text metadata** (title, author, synopsis, etc.) for the entire library. It will not touch or update the existing embedded cover art.
+
+*   `--mode cover-only`
+    *   Forces the update of **only the cover art** for the entire library. It leaves all other text metadata untouched.
 
 **Usage:**
 ```bash
-# Run on your organized library to tag all new books
+# Run in default smart mode (processes only new books)
 python write_tags.py "D:\My Organized Library"
 
-# Force a re-tag of the entire library
-python write_tags.py "D:\My Organized Library" --force
+# Force an update of only the cover art for all books
+python write_tags.py "D:\My Organized Library" --mode cover-only
+
+# Force an update of only the text tags for all books
+python write_tags.py "D:\My Organized Library" --mode tags-only
 ```
 
 ### 3. `generate_inventory.py` - The Inventory Manager

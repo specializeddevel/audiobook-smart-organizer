@@ -24,16 +24,42 @@ def sort_audio_files(files):
     files.sort(key=natural_keys)
     return files
 
-def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_tracks):
+def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_tracks, mode):
     """
-    Applies metadata tags to a single audio file, handling different formats.
+    Applies metadata tags to a single audio file based on the selected mode.
     """
     try:
         audio = File(file_path, easy=False)
         if audio is None:
             raise ValueError("Could not load file.")
-        
-        # --- Clear existing tags to start fresh ---
+
+        # --- Mode: cover-only (non-destructive to other tags) ---
+        if mode == 'cover-only':
+            print(f"      - Updating cover art only for: {os.path.basename(file_path)}")
+            if isinstance(audio, MP3):
+                # Remove old cover art and add new
+                audio.tags.delall('APIC')
+                if cover_image_data:
+                    audio.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=cover_image_data))
+            elif isinstance(audio, MP4):
+                if cover_image_data:
+                    audio.tags["covr"] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
+                elif "covr" in audio.tags:
+                    del audio.tags["covr"]
+            elif isinstance(audio, FLAC):
+                audio.clear_pictures()
+                if cover_image_data:
+                    pic = Picture()
+                    pic.type = 3
+                    pic.mime = "image/jpeg"
+                    pic.desc = "Cover"
+                    pic.data = cover_image_data
+                    audio.add_picture(pic)
+            audio.save()
+            return # Done with this file
+
+        # --- Modes: 'smart', 'all', 'tags-only' (all are destructive) ---
+        # These modes wipe existing tags to ensure a clean slate.
         audio.delete()
 
         # --- Prepare metadata values ---
@@ -46,47 +72,57 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
             track_title = f"Chapter {track_num:02}"
 
         # --- Apply Tags based on file type ---
+        # The 'smart' mode behaves like 'all' for new files.
+        effective_mode = 'all' if mode == 'smart' else mode
+
         if isinstance(audio, MP3):
             audio.tags = ID3()
-            audio.tags.add(TPE1(encoding=3, text=metadata.get("author", "")))
-            audio.tags.add(TALB(encoding=3, text=album_title))
-            audio.tags.add(TIT2(encoding=3, text=track_title))
-            audio.tags.add(TCON(encoding=3, text=metadata.get("genre", "")))
-            audio.tags.add(TRCK(encoding=3, text=f"{track_num}/{total_tracks}"))
-            if metadata.get("year", "") != "Unknown":
-                audio.tags.add(TDRC(encoding=3, text=str(metadata.get("year"))))
-            # Add synopsis to the standard comment tag (for players like AIMP)
-            audio.tags.add(COMM(encoding=3, lang='eng', desc='', text=metadata.get("synopsis", "")))
-            # Add synopsis to a described comment tag (for dedicated tag readers)
-            audio.tags.add(COMM(encoding=3, lang='eng', desc='Synopsis', text=metadata.get("synopsis", "")))
-            if cover_image_data:
+            # Write text tags for 'all' and 'tags-only'
+            if effective_mode in ['all', 'tags-only']:
+                audio.tags.add(TPE1(encoding=3, text=metadata.get("author", "")))
+                audio.tags.add(TALB(encoding=3, text=album_title))
+                audio.tags.add(TIT2(encoding=3, text=track_title))
+                audio.tags.add(TCON(encoding=3, text=metadata.get("genre", "")))
+                audio.tags.add(TRCK(encoding=3, text=f"{track_num}/{total_tracks}"))
+                if metadata.get("year", "") != "Unknown":
+                    audio.tags.add(TDRC(encoding=3, text=str(metadata.get("year"))))
+                audio.tags.add(COMM(encoding=3, lang='eng', desc='', text=metadata.get("synopsis", "")))
+                audio.tags.add(COMM(encoding=3, lang='eng', desc='Synopsis', text=metadata.get("synopsis", "")))
+            # Write cover art only for 'all'
+            if effective_mode == 'all' and cover_image_data:
                 audio.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=cover_image_data))
         
         elif isinstance(audio, MP4):
-            audio.tags["\xa9ART"] = metadata.get("author", "")
-            audio.tags["\xa9alb"] = album_title
-            audio.tags["\xa9nam"] = track_title
-            audio.tags["\xa9gen"] = metadata.get("genre", "")
-            audio.tags["trkn"] = [(track_num, total_tracks)]
-            if metadata.get("year", "") != "Unknown":
-                audio.tags["\xa9day"] = str(metadata.get("year"))
-            audio.tags["\xa9cmt"] = metadata.get("synopsis", "") # Standard Comment
-            audio.tags["ldes"] = metadata.get("synopsis", "")      # Long Description
-            if cover_image_data:
+            # Write text tags for 'all' and 'tags-only'
+            if effective_mode in ['all', 'tags-only']:
+                audio.tags["\xa9ART"] = metadata.get("author", "")
+                audio.tags["\xa9alb"] = album_title
+                audio.tags["\xa9nam"] = track_title
+                audio.tags["\xa9gen"] = metadata.get("genre", "")
+                audio.tags["trkn"] = [(track_num, total_tracks)]
+                if metadata.get("year", "") != "Unknown":
+                    audio.tags["\xa9day"] = str(metadata.get("year"))
+                audio.tags["\xa9cmt"] = metadata.get("synopsis", "")
+                audio.tags["ldes"] = metadata.get("synopsis", "")
+            # Write cover art only for 'all'
+            if effective_mode == 'all' and cover_image_data:
                 audio.tags["covr"] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
 
         elif isinstance(audio, FLAC):
-            audio["ARTIST"] = metadata.get("author", "")
-            audio["ALBUM"] = album_title
-            audio["TITLE"] = track_title
-            audio["GENRE"] = metadata.get("genre", "")
-            audio["TRACKNUMBER"] = str(track_num)
-            audio["TRACKTOTAL"] = str(total_tracks)
-            if metadata.get("year", "") != "Unknown":
-                audio["DATE"] = str(metadata.get("year"))
-            audio["COMMENT"] = metadata.get("synopsis", "")     # Standard Comment
-            audio["DESCRIPTION"] = metadata.get("synopsis", "") # Dedicated Description
-            if cover_image_data:
+            # Write text tags for 'all' and 'tags-only'
+            if effective_mode in ['all', 'tags-only']:
+                audio["ARTIST"] = metadata.get("author", "")
+                audio["ALBUM"] = album_title
+                audio["TITLE"] = track_title
+                audio["GENRE"] = metadata.get("genre", "")
+                audio["TRACKNUMBER"] = str(track_num)
+                audio["TRACKTOTAL"] = str(total_tracks)
+                if metadata.get("year", "") != "Unknown":
+                    audio["DATE"] = str(metadata.get("year"))
+                audio["COMMENT"] = metadata.get("synopsis", "")
+                audio["DESCRIPTION"] = metadata.get("synopsis", "")
+            # Write cover art only for 'all'
+            if effective_mode == 'all' and cover_image_data:
                 pic = Picture()
                 pic.type = 3
                 pic.mime = "image/jpeg"
@@ -105,7 +141,7 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
         print(f"      - ERROR: Failed to tag {os.path.basename(file_path)}: {e}")
 
 
-def process_book_folder(book_path, marker_filepath):
+def process_book_folder(book_path, marker_filepath, mode):
     """
     Finds metadata and audio files in a book folder and processes them.
     """
@@ -146,21 +182,22 @@ def process_book_folder(book_path, marker_filepath):
     
     sorted_audio_files = sort_audio_files(audio_files)
     total_tracks = len(sorted_audio_files)
-    print(f"  - Found {total_tracks} audio file(s). Starting tagging process...")
+    print(f"  - Found {total_tracks} audio file(s). Starting tagging process (mode: {mode})...")
 
     # --- Loop through files and apply tags ---
     for i, filename in enumerate(sorted_audio_files):
         file_path = os.path.join(book_path, filename)
         track_num = i + 1
-        tag_audio_file(file_path, metadata, cover_image_data, track_num, total_tracks)
+        tag_audio_file(file_path, metadata, cover_image_data, track_num, total_tracks, mode)
     
-    # --- Create marker file to indicate successful processing ---
-    try:
-        print(f"  - Creating marker file: {os.path.basename(marker_filepath)}")
-        with open(marker_filepath, 'a'):
-            os.utime(marker_filepath, None)
-    except Exception as e:
-        print(f"  - WARNING: Could not create marker file: {e}")
+    # --- Create marker file to indicate successful processing in relevant modes ---
+    if mode in ['smart', 'all']:
+        try:
+            print(f"  - Creating marker file: {os.path.basename(marker_filepath)}")
+            with open(marker_filepath, 'a'):
+                os.utime(marker_filepath, None)
+        except Exception as e:
+            print(f"  - WARNING: Could not create marker file: {e}")
 
 
 def main():
@@ -175,9 +212,13 @@ def main():
              "Please BACK UP your library before running."
     )
     parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Force the script to re-process all books, even those already marked as processed."
+        "--mode",
+        choices=['smart', 'all', 'tags-only', 'cover-only'],
+        default='smart',
+        help="'smart': Process new books only (default).\n"
+             "'all': Force re-tag of all metadata and covers for all books.\n"
+             "'tags-only': Force re-tag of text metadata only, skipping covers.\n"
+             "'cover-only': Force update of cover art only, skipping other metadata."
     )
     args = parser.parse_args()
 
@@ -189,8 +230,7 @@ def main():
 
     print("--- Starting Audiobook Tagger ---")
     print(f"Library: {library_path_abs}")
-    if args.force:
-        print("Mode: Forcing re-processing of all books.")
+    print(f"Mode: {args.mode}")
     
     marker_filename = ".tags_written"
 
@@ -199,14 +239,14 @@ def main():
         if "metadata.json" in files:
             marker_filepath = os.path.join(root, marker_filename)
 
-            # Check if we should skip this folder
-            if os.path.exists(marker_filepath) and not args.force:
+            # In smart mode, skip folders that have already been processed.
+            if args.mode == 'smart' and os.path.exists(marker_filepath):
                 print(f"\nSkipping folder (already processed): {os.path.basename(root)}")
                 dirs[:] = []  # Don't go into sub-folders of a processed book
                 continue
 
             # We found a book folder, process it.
-            process_book_folder(root, marker_filepath)
+            process_book_folder(root, marker_filepath, args.mode)
             # To avoid processing sub-folders of a book, clear the 'dirs' list
             dirs[:] = [] 
 
