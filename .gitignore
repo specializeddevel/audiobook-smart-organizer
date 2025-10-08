@@ -13,4 +13,6 @@ __pycache__/
 build/
 dist/
 *.egg-info/
-ebooks/ 
+
+# Generated inventory file
+ebooks/inventory.csv
