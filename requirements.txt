@@ -2,3 +2,5 @@ protobuf
 google-generativeai
 mutagen
 python-magic
+requests
+ddgs
