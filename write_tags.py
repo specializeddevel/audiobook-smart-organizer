@@ -1,8 +1,10 @@
-
 import os
 import json
 import argparse
 import sys
+import time
+import requests
+from ddgs import DDGS
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC, TPE1, TALB, TIT2, TCON, TDRC, TRCK, COMM
 from mutagen.mp4 import MP4, MP4Cover
@@ -12,14 +14,52 @@ from mutagen import File
 # Supported audio extensions
 AUDIO_EXTENSIONS = ('.mp3', '.m4a', '.wav', '.flac', '.m4b')
 
+def download_cover_from_internet(book_data, title_dir):
+    """
+    Searches the internet for a book cover using DuckDuckGo and downloads the first result.
+    """
+    try:
+        title = book_data.get("title", "")
+        author = book_data.get("author", "")
+        if not title or title == "Unknown" or not author or author == "Unknown":
+            print("  - Cannot search online without a valid title and author.")
+            return False
+
+        keywords = f'{title} {author} book cover'
+        print(f"  - Searching for cover online with keywords: \"{keywords}\"")
+
+        with DDGS() as ddgs:
+            results = list(ddgs.images(keywords, region='wt-wt', safesearch='moderate', size=None, color=None, type_image=None, layout=None, license_image=None, max_results=5))
+
+        if not results:
+            print("  - Online search returned no image results.")
+            return False
+
+        image_url = results[0].get("image")
+        print(f"  - Found potential cover: {image_url}")
+
+        response = requests.get(image_url, stream=True, timeout=15)
+        response.raise_for_status()
+
+        cover_path = os.path.join(title_dir, "cover.jpg")
+        with open(cover_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        
+        print("  - Successfully downloaded and saved cover.jpg.")
+        return True
+
+    except Exception as e:
+        print(f"  - ERROR: Failed to download cover: {e}")
+        return False
+
 def sort_audio_files(files):
     """
     Sorts a list of audio filenames naturally to handle chapter numbers correctly.
-    (e.g., "chapter 1.mp3", "chapter 2.mp3", "chapter 10.mp3")
     """
     import re
     def natural_keys(text):
-        return [int(c) if c.isdigit() else c for c in re.split('(\\d+)', text)]
+        return [int(c) if c.isdigit() else c for c in re.split('(\d+)', text)]
     
     files.sort(key=natural_keys)
     return files
@@ -33,11 +73,9 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
         if audio is None:
             raise ValueError("Could not load file.")
 
-        # --- Mode: cover-only (non-destructive to other tags) ---
         if mode == 'cover-only':
             print(f"      - Updating cover art only for: {os.path.basename(file_path)}")
             if isinstance(audio, MP3):
-                # Remove old cover art and add new
                 audio.tags.delall('APIC')
                 if cover_image_data:
                     audio.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=cover_image_data))
@@ -56,13 +94,9 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
                     pic.data = cover_image_data
                     audio.add_picture(pic)
             audio.save()
-            return # Done with this file
+            return
 
-        # --- Modes: 'smart', 'all', 'tags-only' (all are destructive) ---
-        # These modes wipe existing tags to ensure a clean slate.
         audio.delete()
-
-        # --- Prepare metadata values ---
         album_title = metadata.get("title", "Unknown Title")
         if metadata.get("series") and metadata["series"] != "Unknown":
             album_title = f"{metadata['series']} - {album_title}"
@@ -71,13 +105,10 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
         if total_tracks > 1:
             track_title = f"Chapter {track_num:02}"
 
-        # --- Apply Tags based on file type ---
-        # The 'smart' mode behaves like 'all' for new files.
         effective_mode = 'all' if mode == 'smart' else mode
 
         if isinstance(audio, MP3):
             audio.tags = ID3()
-            # Write text tags for 'all' and 'tags-only'
             if effective_mode in ['all', 'tags-only']:
                 audio.tags.add(TPE1(encoding=3, text=metadata.get("author", "")))
                 audio.tags.add(TALB(encoding=3, text=album_title))
@@ -88,12 +119,10 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
                     audio.tags.add(TDRC(encoding=3, text=str(metadata.get("year"))))
                 audio.tags.add(COMM(encoding=3, lang='eng', desc='', text=metadata.get("synopsis", "")))
                 audio.tags.add(COMM(encoding=3, lang='eng', desc='Synopsis', text=metadata.get("synopsis", "")))
-            # Write cover art only for 'all'
             if effective_mode == 'all' and cover_image_data:
                 audio.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=cover_image_data))
         
         elif isinstance(audio, MP4):
-            # Write text tags for 'all' and 'tags-only'
             if effective_mode in ['all', 'tags-only']:
                 audio.tags["\xa9ART"] = metadata.get("author", "")
                 audio.tags["\xa9alb"] = album_title
@@ -104,12 +133,10 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
                     audio.tags["\xa9day"] = str(metadata.get("year"))
                 audio.tags["\xa9cmt"] = metadata.get("synopsis", "")
                 audio.tags["ldes"] = metadata.get("synopsis", "")
-            # Write cover art only for 'all'
             if effective_mode == 'all' and cover_image_data:
                 audio.tags["covr"] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
 
         elif isinstance(audio, FLAC):
-            # Write text tags for 'all' and 'tags-only'
             if effective_mode in ['all', 'tags-only']:
                 audio["ARTIST"] = metadata.get("author", "")
                 audio["ALBUM"] = album_title
@@ -121,7 +148,6 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
                     audio["DATE"] = str(metadata.get("year"))
                 audio["COMMENT"] = metadata.get("synopsis", "")
                 audio["DESCRIPTION"] = metadata.get("synopsis", "")
-            # Write cover art only for 'all'
             if effective_mode == 'all' and cover_image_data:
                 pic = Picture()
                 pic.type = 3
@@ -129,7 +155,6 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
                 pic.desc = "Cover"
                 pic.data = cover_image_data
                 audio.add_picture(pic)
-
         else:
             print(f"      - Unsupported file type: {type(audio)}. Skipping tagging.")
             return
@@ -139,7 +164,6 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
 
     except Exception as e:
         print(f"      - ERROR: Failed to tag {os.path.basename(file_path)}: {e}")
-
 
 def process_book_folder(book_path, marker_filepath, mode):
     """
@@ -153,7 +177,6 @@ def process_book_folder(book_path, marker_filepath, mode):
         print("  - metadata.json not found. Skipping folder.")
         return
 
-    # --- Load Metadata ---
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
@@ -162,7 +185,6 @@ def process_book_folder(book_path, marker_filepath, mode):
         print(f"  - ERROR: Could not read or parse metadata.json: {e}. Skipping folder.")
         return
 
-    # --- Load Cover Art ---
     cover_image_data = None
     if os.path.exists(cover_path):
         try:
@@ -174,7 +196,6 @@ def process_book_folder(book_path, marker_filepath, mode):
     else:
         print("  - No cover.jpg found in this folder.")
 
-    # --- Find and Sort Audio Files ---
     audio_files = [f for f in os.listdir(book_path) if f.lower().endswith(AUDIO_EXTENSIONS)]
     if not audio_files:
         print("  - No audio files found in this folder. Skipping.")
@@ -184,13 +205,11 @@ def process_book_folder(book_path, marker_filepath, mode):
     total_tracks = len(sorted_audio_files)
     print(f"  - Found {total_tracks} audio file(s). Starting tagging process (mode: {mode})...")
 
-    # --- Loop through files and apply tags ---
     for i, filename in enumerate(sorted_audio_files):
         file_path = os.path.join(book_path, filename)
         track_num = i + 1
         tag_audio_file(file_path, metadata, cover_image_data, track_num, total_tracks, mode)
     
-    # --- Create marker file to indicate successful processing in relevant modes ---
     if mode in ['smart', 'all']:
         try:
             print(f"  - Creating marker file: {os.path.basename(marker_filepath)}")
@@ -199,58 +218,170 @@ def process_book_folder(book_path, marker_filepath, mode):
         except Exception as e:
             print(f"  - WARNING: Could not create marker file: {e}")
 
+def process_single_file(file_path, mode):
+    """
+    Processes a single audio file by finding its corresponding metadata.
+    """
+    print(f"\nProcessing single file: {os.path.basename(file_path)}")
+    book_path = os.path.dirname(file_path)
+    json_path = os.path.join(book_path, "metadata.json")
+    cover_path = os.path.join(book_path, "cover.jpg")
+
+    if not os.path.exists(json_path):
+        print(f"  - ERROR: metadata.json not found in parent directory '{book_path}'. Skipping.")
+        return
+
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
+        print("  - Loaded metadata.json")
+    except Exception as e:
+        print(f"  - ERROR: Could not read or parse metadata.json: {e}. Skipping.")
+        return
+
+    cover_image_data = None
+    if os.path.exists(cover_path):
+        try:
+            with open(cover_path, 'rb') as f:
+                cover_image_data = f.read()
+            print("  - Loaded cover.jpg")
+        except Exception as e:
+            print(f"  - WARNING: Could not read cover.jpg: {e}. Proceeding without cover.")
+    else:
+        print("  - No cover.jpg found in this folder.")
+
+    audio_files = [f for f in os.listdir(book_path) if f.lower().endswith(AUDIO_EXTENSIONS)]
+    if not audio_files:
+        print("  - No audio files found in the parent directory. Skipping.")
+        return
+    
+    sorted_audio_files = sort_audio_files(audio_files)
+    total_tracks = len(sorted_audio_files)
+    
+    try:
+        track_num = sorted_audio_files.index(os.path.basename(file_path)) + 1
+    except ValueError:
+        print(f"  - ERROR: Could not determine track number for the file. Skipping.")
+        return
+
+    print(f"  - File is track {track_num}/{total_tracks}. Starting tagging process (mode: {mode})...")
+    tag_audio_file(file_path, metadata, cover_image_data, track_num, total_tracks, mode)
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Writes metadata from JSON files into the audio file tags for an entire library.",
+        description="Writes metadata from JSON files into the audio file tags.",
         formatter_class=argparse.RawTextHelpFormatter
     )
     parser.add_argument(
-        "library_directory",
-        help="The root directory of your organized audiobook library.\n"
-             "WARNING: This script MODIFIES audio files in place.\n"
-             "Please BACK UP your library before running."
+        "target_path",
+        help="The path to the library directory OR a single audio file to process."
     )
     parser.add_argument(
         "--mode",
-        choices=['smart', 'all', 'tags-only', 'cover-only'],
+        choices=['smart', 'all', 'tags-only', 'cover-only', 'fix-covers'],
         default='smart',
         help="'smart': Process new books only (default).\n"
              "'all': Force re-tag of all metadata and covers for all books.\n"
-             "'tags-only': Force re-tag of text metadata only, skipping covers.\n"
-             "'cover-only': Force update of cover art only, skipping other metadata."
+             "'tags-only': Force re-tag of text metadata only.\n"
+             "'cover-only': Force update of cover art only.\n"
+             "'fix-covers': Find books missing a cover, download it, and embed it."
     )
     args = parser.parse_args()
 
-    library_path_abs = os.path.abspath(args.library_directory)
+    target_path_abs = os.path.abspath(args.target_path)
 
-    if not os.path.isdir(library_path_abs):
-        print(f"Error: The specified directory '{library_path_abs}' does not exist.", file=sys.stderr)
+    if not os.path.exists(target_path_abs):
+        print(f"Error: The specified path '{target_path_abs}' does not exist.", file=sys.stderr)
         sys.exit(1)
 
-    print("--- Starting Audiobook Tagger ---")
-    print(f"Library: {library_path_abs}")
-    print(f"Mode: {args.mode}")
-    
-    marker_filename = ".tags_written"
+    if os.path.isfile(target_path_abs):
+        if not target_path_abs.lower().endswith(AUDIO_EXTENSIONS):
+            print(f"Error: The specified file is not a supported audio format.", file=sys.stderr)
+            sys.exit(1)
+        
+        print("--- Starting Audiobook Tagger (Single File Mode) ---")
+        process_single_file(target_path_abs, args.mode)
+        print("\n--- Tagger Finished ---")
+        return
 
-    # Walk through the library and find book folders (containing metadata.json)
-    for root, dirs, files in os.walk(library_path_abs):
-        if "metadata.json" in files:
-            marker_filepath = os.path.join(root, marker_filename)
+    if os.path.isdir(target_path_abs):
+        print("--- Starting Audiobook Tagger (Directory Mode) ---")
+        print(f"Library: {target_path_abs}")
+        print(f"Mode: {args.mode}")
+        
+        if args.mode == 'fix-covers':
+            for root, dirs, files in os.walk(target_path_abs):
+                if "metadata.json" in files:
+                    print(f"\nChecking book: {os.path.basename(root)}")
+                    json_path = os.path.join(root, "metadata.json")
+                    cover_path = os.path.join(root, "cover.jpg")
+                    cover_was_newly_downloaded = False
+                    
+                    try:
+                        # Step 1: If cover.jpg does not exist, try to download it.
+                        if not os.path.exists(cover_path):
+                            print("  - No cover.jpg found. Attempting to download...")
+                            with open(json_path, 'r+', encoding='utf-8') as f:
+                                metadata = json.load(f)
+                                if download_cover_from_internet(metadata, root):
+                                    print("  - Download successful.")
+                                    cover_was_newly_downloaded = True # Set flag
+                                    metadata['cover_art_found'] = True
+                                    f.seek(0)
+                                    json.dump(metadata, f, ensure_ascii=False, indent=4)
+                                    f.truncate()
+                                else:
+                                    print("  - Failed to download a new cover. Skipping.")
+                        else:
+                            print("  - Local cover.jpg already exists. No action needed.")
 
-            # In smart mode, skip folders that have already been processed.
-            if args.mode == 'smart' and os.path.exists(marker_filepath):
-                print(f"\nSkipping folder (already processed): {os.path.basename(root)}")
-                dirs[:] = []  # Don't go into sub-folders of a processed book
-                continue
+                        # Step 2: If a cover was newly downloaded, embed it into the audio files.
+                        if cover_was_newly_downloaded:
+                            print("  - Syncing newly downloaded cover art to audio file tags...")
+                            # We need to load the metadata and cover data again to be safe
+                            with open(json_path, 'r', encoding='utf-8') as f:
+                                metadata = json.load(f)
+                            with open(cover_path, 'rb') as f:
+                                cover_image_data = f.read()
+                            
+                            audio_files = [f for f in os.listdir(root) if f.lower().endswith(AUDIO_EXTENSIONS)]
+                            if not audio_files:
+                                print("  - No audio files found to tag.")
+                                continue
 
-            # We found a book folder, process it.
-            process_book_folder(root, marker_filepath, args.mode)
-            # To avoid processing sub-folders of a book, clear the 'dirs' list
-            dirs[:] = [] 
+                            sorted_audio_files = sort_audio_files(audio_files)
+                            total_tracks = len(sorted_audio_files)
 
-    print("\n--- Tagger Finished ---")
+                            for i, filename in enumerate(sorted_audio_files):
+                                file_path = os.path.join(root, filename)
+                                tag_audio_file(file_path, metadata, cover_image_data, i + 1, total_tracks, 'cover-only')
+                        
+                    except Exception as e:
+                        print(f"  - An unexpected ERROR occurred while processing {os.path.basename(root)}: {e}")
+                    
+                    finally:
+                        # Pause between each book folder to avoid rate-limiting
+                        time.sleep(2)
+                        dirs[:] = [] # Prune traversal to not go deeper into book folders
+            
+            print("\n--- Fix Covers Finished ---")
+            return
+
+        marker_filename = ".tags_written"
+        for root, dirs, files in os.walk(target_path_abs):
+            if "metadata.json" in files:
+                marker_filepath = os.path.join(root, marker_filename)
+
+                if args.mode == 'smart' and os.path.exists(marker_filepath):
+                    print(f"\nSkipping folder (already processed): {os.path.basename(root)}")
+                    dirs[:] = []
+                    continue
+
+                process_book_folder(root, marker_filepath, args.mode)
+                dirs[:] = [] 
+        
+        print("\n--- Tagger Finished ---")
+        return
 
 if __name__ == "__main__":
     main()

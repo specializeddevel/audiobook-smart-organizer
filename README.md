@@ -5,84 +5,103 @@ AudioBookSort is a suite of Python scripts designed to automatically organize, t
 ## Core Features
 
 - **Automatic Organization**: Intelligently groups loose audio files into book folders, named and structured by `Author/Title`.
-- **AI-Powered Metadata**: Uses the Google Gemini API to fetch rich metadata for your audiobooks, including title, author, genre, series, year, and a full synopsis.
-- **Advanced & Granular Tagging**: Embeds all metadata and cover art directly into each audio file (`.mp3`, `.m4a`, `.m4b`, `.flac`) with multiple modes for precise control over the tagging process.
+- **AI-Powered Metadata**: Uses the Google Gemini API to fetch rich metadata (title, author, series, synopsis, etc.) for your audiobooks.
+- **Multi-Source Cover Art**: Automatically finds the best available cover art through a 3-step process:
+    1.  Detects local image files (e.g., `MyBook.jpg`).
+    2.  Extracts embedded cover art from audio files.
+    3.  Searches the internet for a high-quality cover if no local art is found.
+- **Advanced & Granular Tagging**: Embeds all metadata and cover art directly into each audio file (`.mp3`, `.m4a`, `.m4b`, `.flac`) with multiple modes for precise control.
+- **Robust and Safe**: The organization process uses a safe staging area to prevent file loss if the script is interrupted. It's also fault-tolerant, skipping individual books that have errors without stopping the entire process.
+- **Library Maintenance**: Includes tools to pre-extract existing covers for review and to find and fix books missing cover art in an already organized library.
 - **Master Inventory**: Generates and maintains a master `inventory.csv` file, perfect for viewing your library in a spreadsheet.
-- **Efficient & Smart**: Avoids re-processing books that have already been tagged, making updates fast.
 
 ---
 
 ## Recommended Workflow
 
-1.  **Organize**: Run `ebooksort.py` on your messy folder to classify and sort your books into a new, clean library directory.
-2.  **Tag**: Run `write_tags.py` on the new library directory to embed all the metadata and cover art into the audio files. Use the different modes for granular control on subsequent runs.
-3.  **Inventory (Optional)**: Run `generate_inventory.py` whenever you want an up-to-date spreadsheet of your entire collection.
+The workflow is designed to be flexible, giving you control at each step.
+
+### Step 1: (Optional) Extract Existing Covers
+Run `extract_covers.py` on your messy folder. This script finds all audio files with embedded cover art and saves that art as a `.jpg` file next to the original audio file.
+
+**Why do this?** It gives you a clear visual overview of which books already have covers before you start the main organization.
+
+```bash
+python extract_covers.py "C:\Path\To\Your\Unorganized\Audiobooks"
+```
+
+### Step 2: Organize the Library
+Run `ebooksort.py`. This is the main workhorse. It will:
+1.  Group your audio files into book folders in a safe staging area.
+2.  Get high-quality metadata from the Gemini API.
+3.  Find the best cover art by searching local files, embedded tags, and finally the internet.
+4.  Move the organized books into a clean `Author/Title` structure.
+
+```bash
+python ebooksort.py "C:\Path\To\Your\Unorganized\Audiobooks" -d "D:\My Organized Library"
+```
+
+### Step 3: Tag the Files
+Run `write_tags.py` on the newly organized library. This embeds all the metadata and the final cover art into each audio file, making your library perfectly portable.
+
+```bash
+# Use 'smart' mode to only tag new books
+python write_tags.py "D:\My Organized Library" --mode smart
+```
+
+### Step 4: (Optional) Maintain and Generate Inventory
+- Run `write_tags.py --mode fix-covers` at any time to scan your library and automatically download and embed missing covers for books that were already organized.
+- Run `generate_inventory.py` whenever you want an up-to-date spreadsheet of your entire collection.
 
 ---
 
 ## The Scripts
 
-This project includes three main scripts that form a complete workflow.
-
-### 1. `ebooksort.py` - The Organizer
-
-This is the first script you should run. It takes a source directory of unorganized audio files, groups them into books, fetches their metadata via the Gemini API, and sorts them into a clean `Author/Title` directory structure.
-
-> **Pro-Tip for Best Results:**
-> For the most accurate metadata retrieval, it is highly recommended to name your unorganized audio files with both the book title and the author. The script is very effective at parsing names like:
-> - `The Lord of the Rings - J.R.R. Tolkien.mp3`
-> - `J.R.R. Tolkien - The Hobbit.m4b`
-> - `A Game of Thrones by George R.R. Martin (Part 1).mp3`
-> - `The_Eye_of_the_World_Robert_Jordan.flac`
+### 1. `extract_covers.py` - The Cover Extractor
+This script is your first step for pre-flight checks. It scans a directory, finds all audio files with embedded art, and extracts it as a `.jpg` file with the same name. This helps you see what you have before you start.
 
 **Usage:**
 ```bash
-# Basic usage (outputs to a new 'ebooks' folder)
-python ebooksort.py "C:\Path\To\Your\Unorganized\Audiobooks"
+python extract_covers.py "C:\Path\To\Audiobooks"
+```
 
-# Specify a destination for the organized library
+### 2. `ebooksort.py` - The Organizer
+This is the core script. It takes a source directory, groups files, and uses the Gemini API and web search to classify, enrich, and sort them into a clean `Author/Title` directory structure.
+
+> **New in this version:**
+> - **Online Cover Search**: If no local or embedded cover is found, this script will automatically search the internet for a suitable cover.
+> - **Safe Staging Area**: All operations are performed in a temporary `_ebooksort_staging_...` folder. If the script fails or is cancelled, your files remain safely in this folder for recovery, preventing data loss.
+> - **Fault-Tolerant**: If processing a single book fails, the script will log the error and continue with the rest of the library.
+
+**Usage:**
+```bash
 python ebooksort.py "C:\Path\To\Audiobooks" -d "D:\My Organized Library"
 ```
 
-### 2. `write_tags.py` - The Advanced Tagger
-
-This script reads the `metadata.json` and `cover.jpg` from each book folder and writes that information directly into the metadata tags of the audio files. It offers several modes for precise control over the tagging process.
+### 3. `write_tags.py` - The Advanced Tagger
+This script writes the `metadata.json` and `cover.jpg` information directly into the audio files' metadata tags.
 
 **Tagging Modes**
+Includes `smart`, `all`, `tags-only`, `cover-only`, and the new maintenance mode:
 
-You can control the script's behavior using the `--mode` argument:
+*   `--mode fix-covers` (New!)
+    *   Scans an entire library for books that are missing a `cover.jpg` file.
+    *   For each one it finds, it reads the `metadata.json`, searches for a cover online, downloads it, and embeds it into the audio files. Perfect for repairing an existing library.
 
-*   `--mode smart` (Default)
-    *   Processes only new books that haven't been tagged before. It identifies them by looking for a `.tags_written` marker file in the book's folder.
-
-*   `--mode all`
-    *   Forces the re-tagging of the entire library. It re-writes **all text metadata and the cover art** for every book, ignoring any `.tags_written` markers.
-
-*   `--mode tags-only`
-    *   Forces the re-tagging of **only the text metadata** (title, author, synopsis, etc.) for the entire library. It will not touch or update the existing embedded cover art.
-
-*   `--mode cover-only`
-    *   Forces the update of **only the cover art** for the entire library. It leaves all other text metadata untouched.
-
-**Usage:**
+**Usage**
 ```bash
-# Run in default smart mode (processes only new books)
-python write_tags.py "D:\My Organized Library"
+# Find and fix books with missing covers in your library
+python write_tags.py "D:\My Organized Library" --mode fix-covers
 
-# Force an update of only the cover art for all books
-python write_tags.py "D:\My Organized Library" --mode cover-only
-
-# Force an update of only the text tags for all books
-python write_tags.py "D:\My Organized Library" --mode tags-only
+# Run in default smart mode to tag new additions
+python write_tags.py "D:\My Organized Library" --mode smart
 ```
 
-### 3. `generate_inventory.py` - The Inventory Manager
-
-This script allows you to generate or regenerate the `inventory.csv` file for your library at any time. It scans all the `metadata.json` files in your organized library and creates a fresh, pipe-delimited (`|`) CSV file.
+### 4. `generate_inventory.py` - The Inventory Manager
+This script's functionality remains the same. It generates a master `inventory.csv` file for your library.
 
 **Usage:**
 ```bash
-# Generate a new inventory.csv inside your library folder
 python generate_inventory.py "D:\My Organized Library"
 ```
 
@@ -100,6 +119,7 @@ python generate_inventory.py "D:\My Organized Library"
     ```bash
     pip install -r requirements.txt
     ```
+    *(This will install `google-generativeai`, `mutagen`, `requests`, and `ddgs`)*.
 3.  **Set Up Your API Key:** The scripts require a Google Gemini API key to be set as an environment variable.
 
     **Windows:**
@@ -119,19 +139,22 @@ python generate_inventory.py "D:\My Organized Library"
 ## Technologies Used
 
 *   **Python 3**: The core language for all scripts.
-*   **Google Gemini API**: Used for its powerful natural language processing to extract structured book metadata from simple filenames.
-*   **`mutagen`**: A robust Python library used for reading and writing audio metadata tags across multiple formats (ID3 for MP3, MP4 atoms for M4A/M4B, and Vorbis comments for FLAC).
-*   **`google-generativeai`**: The official Google client library for interacting with the Gemini API.
+*   **Google Gemini API**: Used for its powerful natural language processing to extract structured book metadata.
+*   **`mutagen`**: A robust Python library for reading and writing audio metadata tags.
+*   **`ddgs`**: Used to perform web searches for cover art via DuckDuckGo, avoiding the need for an additional API key.
+*   **`requests`**: A standard, powerful library for making HTTP requests to download cover images.
+*   **`google-generativeai`**: The official Google client library for the Gemini API.
 
 ## Learning & Key Takeaways
 
 This project served as a practical exercise in several key areas:
 
-*   **API Integration**: Interacting with a powerful third-party AI service to enrich local data.
+*   **API Integration**: Interacting with third-party AI and search services to enrich local data.
 *   **File I/O and Management**: Systematically scanning, moving, and organizing files and directories.
-*   **Metadata Handling**: Deep-diving into the complexities and differences between audio tagging standards (ID3 vs. MP4 vs. Vorbis). The iterative process of fixing compatibility issues (e.g., the comment tag in AIMP) highlighted the importance of understanding how different applications interpret metadata.
-*   **Workflow Optimization**: Devising an efficient method (the `.tags_written` marker file) to prevent redundant processing in a large dataset, moving from a brute-force to a smart, incremental update strategy.
-*   **Modular Tooling**: Building a suite of small, focused scripts that work together, rather than a single monolithic application. This provides greater flexibility and maintainability.
+*   **Fault Tolerance**: Implementing robust `try...except` blocks for network requests and file operations makes a script usable for large batches, as a single failure doesn't halt the entire process.
+*   **Safe File Operations**: Using a staging area for destructive operations like moving files is critical to prevent data loss if a script is interrupted.
+*   **Metadata Handling**: Deep-diving into the complexities of audio tagging standards (ID3 vs. MP4 vs. Vorbis).
+*   **Modular Tooling**: Building a suite of small, focused scripts that work together provides greater flexibility and maintainability.
 
 ---
 
