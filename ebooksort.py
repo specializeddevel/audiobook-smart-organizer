@@ -27,6 +27,34 @@ except KeyError:
 AUDIO_EXTENSIONS = ('.mp3', '.m4a', '.wav', '.flac', '.m4b')
 
 
+def add_author_to_known_list(author_name, filepath="known_authors.txt"):
+    """
+    Adds a new author to the known authors file if not already present.
+    The check is case-insensitive, and authors are stored in Title Case.
+    """
+    if not author_name or author_name == "Unknown":
+        return
+
+    author_to_add = author_name.strip().title()
+    
+    try:
+        # Read existing authors into a case-insensitive set for efficient lookup
+        if os.path.exists(filepath):
+            with open(filepath, 'r', encoding='utf-8') as f:
+                existing_authors = {line.strip().lower() for line in f}
+        else:
+            existing_authors = set()
+
+        # If author is not already in the set, append to the file
+        if author_to_add.lower() not in existing_authors:
+            with open(filepath, 'a', encoding='utf-8') as f:
+                f.write(author_to_add + '\n')
+            print(f"  - Author '{author_to_add}' added to known authors list.")
+
+    except IOError as e:
+        print(f"  - WARNING: Could not read or write to authors file '{filepath}': {e}")
+
+
 def get_book_info_from_gemini(info_string):
     """
     Tries to get the book's title, author, series, publication year, and synopsis using Gemini.
@@ -310,6 +338,8 @@ def organize_audio_files(base_dir, dest_dir):
             book_data = get_book_info_from_gemini(gemini_info_string)
 
             if book_data and book_data["title"] != "Unknown":
+                # Add author to our knowledge base
+                add_author_to_known_list(book_data["author"])
                 author_folder_name = sanitize_filename(book_data["author"].title())
                 title_folder_name = sanitize_filename(book_data["title"].title())
                 relative_path = os.path.join(author_folder_name, title_folder_name)
