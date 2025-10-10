@@ -274,6 +274,7 @@ def organize_audio_files(base_dir, dest_dir):
     unclassified_dir = os.path.join(dest_dir, "unclassified")
     os.makedirs(dest_dir, exist_ok=True)
     os.makedirs(unclassified_dir, exist_ok=True)
+    books_without_cover = []
 
     csv_path = os.path.join(dest_dir, "inventory.csv")
     if not os.path.isfile(csv_path):
@@ -283,7 +284,7 @@ def organize_audio_files(base_dir, dest_dir):
                 writer.writerow(["Title", "Author", "Genre", "Series", "Year", "Synopsis", "Path", "ProcessingDate", "FileCount", "TotalSizeMB", "CoverArtFound"])
         except IOError as e:
             print(f"Error: Could not write CSV inventory file at '{csv_path}': {e}")
-            return
+            return []
 
     for root, _, files in os.walk(base_dir):
         if os.path.abspath(root) == os.path.abspath(base_dir):
@@ -311,6 +312,7 @@ def organize_audio_files(base_dir, dest_dir):
             if book_data and book_data["title"] != "Unknown":
                 author_folder_name = sanitize_filename(book_data["author"].title())
                 title_folder_name = sanitize_filename(book_data["title"].title())
+                relative_path = os.path.join(author_folder_name, title_folder_name)
 
                 author_dir = os.path.join(dest_dir, author_folder_name)
                 title_dir = os.path.join(author_dir, title_folder_name)
@@ -329,6 +331,7 @@ def organize_audio_files(base_dir, dest_dir):
                     print("Cover art processing complete.")
                 else:
                     print("Could not find a cover for this book.")
+                    books_without_cover.append(relative_path)
 
                 book_data['processing_date'] = processing_date
                 book_data['file_count'] = file_count
@@ -343,7 +346,6 @@ def organize_audio_files(base_dir, dest_dir):
                 try:
                     with open(csv_path, 'a', newline='', encoding='utf-8') as csvfile:
                         writer = csv.writer(csvfile, delimiter='|')
-                        relative_path = os.path.join(author_folder_name, title_folder_name)
                         writer.writerow([book_data.get("title", ""), book_data.get("author", ""), book_data.get("genre", ""), book_data.get("series", ""), book_data.get("year", ""), book_data.get("synopsis", ""), relative_path, processing_date, file_count, total_size_mb, cover_art_found])
                     print("Book data added to CSV inventory.")
                 except IOError as e:
@@ -371,6 +373,8 @@ def organize_audio_files(base_dir, dest_dir):
             # Add a delay to avoid rate-limiting APIs
             print("Pausing for 2 seconds...")
             time.sleep(2)
+    
+    return books_without_cover
 
 def main():
     parser = argparse.ArgumentParser(
@@ -409,7 +413,7 @@ def main():
         pre_organize_into_folders(source_dir_abs, staging_dir)
 
         print("\n--- Phase 2: Classifying and organizing folders ---")
-        organize_audio_files(staging_dir, dest_dir_abs)
+        books_without_cover = organize_audio_files(staging_dir, dest_dir_abs)
 
         print(f"\nProcess finished. Checking for unprocessed items in staging area...")
         remaining_items = os.listdir(staging_dir)
@@ -423,6 +427,12 @@ def main():
             for item in remaining_items:
                 print(f"  - {item}")
             print(f"Staging directory location: {staging_dir}")
+
+        if books_without_cover:
+            print("\n--- Books Missing Covers ---")
+            print("The following books were processed but a cover image could not be found:")
+            for book_path in sorted(books_without_cover):
+                print(f"  - {book_path}")
 
     except (KeyboardInterrupt, Exception) as e:
         print("\n--- A CRITICAL ERROR OCCURRED ---")
