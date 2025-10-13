@@ -22,6 +22,7 @@ EbookSort is a suite of Python scripts designed to automatically organize, tag, 
 - Python 3.7+
 - A Google Gemini API Key.
 - The Python dependencies listed in `requirements.txt`.
+- **FFmpeg**: Required by the `create_m4b.py` script. You must install it separately and ensure it is available in your system's PATH.
 
 ---
 
@@ -64,6 +65,8 @@ export GOOGLE_API_KEY="YOUR_API_KEY_HERE"
 
 ## Scripts and Usage
 
+Here is a detailed breakdown of each script and its available command-line arguments.
+
 ### 1. `validate_names.py` - The Validator
 
 This script is a diagnostic tool. It analyzes the names of folders and audio files in a directory to identify those that likely do not contain enough information (title and author) to be classified correctly.
@@ -74,6 +77,17 @@ This script is a diagnostic tool. It analyzes the names of folders and audio fil
 ```bash
 python validate_names.py "C:\Path\To\Your\Audiobooks"
 ```
+
+**Arguments:**
+
+*   **`source_directory`** (Positional, Required)
+    *   **Description**: The path to the directory you want to analyze for problematic names.
+    *   **Example**: `C:\MyAudiobooks\ToCheck`
+
+*   **`--authors-file`** (Optional)
+    *   **Description**: The path to the text file containing the list of known authors. Using this list helps the script more accurately identify if a filename contains an author.
+    *   **Default**: `known_authors.txt` in the current directory.
+    *   **Example**: `--authors-file "C:\Config\authors.txt"`
 
 ### 2. `ebooksort.py` - The Organizer
 
@@ -91,16 +105,23 @@ python ebooksort.py "C:\Path\To\Your\Audiobooks"
 python ebooksort.py "C:\Source" -d "D:\Organized Library"
 ```
 
+**Arguments:**
+
+*   **`source_directory`** (Positional, Required)
+    *   **Description**: The path to the directory containing the unorganized audiobooks (loose files or folders).
+    *   **Example**: `C:\MyAudiobooks\New`
+
+*   **`-d` / `--destination_directory`** (Optional)
+    *   **Description**: Specifies the path to the final organized library. If not provided, the script will perform the organization "in-place," meaning the `source_directory` will become the organized library.
+    *   **Default**: The same as `source_directory`.
+    *   **Example**: `-d "D:\AudiobookLibrary"`
+
+*   **`--dry-run`** (Optional, Flag)
+    *   **Description**: Performs a simulation of the process. It prints all the actions that would be taken (moving files, calling APIs, writing metadata) but does not execute any real action. Ideal for safely previewing changes.
+
 ### 3. `write_tags.py` - The Tagger
 
 This script reads the metadata (`metadata.json`) and cover art (`cover.jpg`) for each book in your organized library and writes that information into the audio files' tags.
-
-**Execution Modes (`--mode`):**
-- `smart` (default): Only processes new books that haven't been tagged before.
-- `all`: Forces a re-tag of all metadata and covers for all books.
-- `tags-only`: Re-tags only the text metadata (title, author, etc.).
-- `cover-only`: Updates only the cover art in the files.
-- `fix-covers`: Scans the library, finds books missing a cover, downloads it, and embeds it.
 
 **Usage:**
 ```bash
@@ -111,7 +132,46 @@ python write_tags.py "D:\Organized Library" --mode smart
 python write_tags.py "D:\Organized Library" --mode fix-covers
 ```
 
-### 4. `generate_inventory.py` - The Inventory Generator
+**Arguments:**
+
+*   **`target_path`** (Positional, Required)
+    *   **Description**: Can be the path to the already organized audiobook library or the path to a single audio file you want to tag.
+    *   **Example (Directory)**: `D:\AudiobookLibrary`
+    *   **Example (File)**: `D:\AudiobookLibrary\Author\Title\Chapter1.mp3`
+
+*   **`--mode`** (Optional)
+    *   **Description**: Controls the tagging behavior.
+    *   **Default**: `smart`.
+    *   **Options**:
+        *   `smart`: (Recommended) Only processes books that have not been tagged before. It looks for a marker file (`.tags_written`) to skip already processed folders.
+        *   `all`: Forcibly re-tags all books in the library, overwriting existing metadata and covers.
+        *   `tags-only`: Re-writes only the text metadata (title, author, etc.), but does not touch the cover art.
+        *   `cover-only`: Updates only the cover art in the audio files, leaving other metadata intact.
+        *   `fix-covers`: A special maintenance mode. It scans the library for books that do not have a `cover.jpg` file, tries to download it, and then embeds it into the corresponding audio files.
+
+*   **`--dry-run`** (Optional, Flag)
+    *   **Description**: Performs a simulation of the tagging process. It prints the files that would be modified but does not save any changes to the audio files.
+
+### 4. `create_m4b.py` - The M4B Creator
+
+Combines a folder of audio files (chapters) into a single `.m4b` audiobook file, complete with chapters, metadata, and cover art. **Requires FFmpeg to be installed** and accessible in the system's PATH.
+
+**Usage:**
+```bash
+# Create an M4B file from a book folder
+python create_m4b.py "D:\Organized Library\Author Name\Book Title"
+```
+
+**Arguments:**
+
+*   **`book_folder_path`** (Positional, Required)
+    *   **Description**: The path to the book's folder, which contains the audio files and `metadata.json`.
+    *   **Example**: `D:\AudiobookLibrary\Morgan Rice\Arena Dos Supervivencia`
+
+*   **`--dry-run`** (Optional, Flag)
+    *   **Description**: Displays the FFmpeg command that would be executed to create the `.m4b` file, but does not run it. Useful for debugging.
+
+### 5. `generate_inventory.py` - The Inventory Generator
 
 This script regenerates the `inventory.csv` file from the metadata in your library. It's useful if you have manually moved or deleted books and want the inventory to reflect the current state.
 
@@ -120,7 +180,33 @@ This script regenerates the `inventory.csv` file from the metadata in your libra
 python generate_inventory.py "D:\Organized Library"
 ```
 
-### 5. `extract_covers.py` - The Cover Extractor
+**Arguments:**
+
+*   **`library_directory`** (Positional, Required)
+    *   **Description**: The path to the root directory of your organized audiobook library.
+    *   **Example**: `D:\AudiobookLibrary`
+
+### 6. `populate_authors.py` - The Author Populator
+
+Scans the library to find authors in the metadata and add them to your `known_authors.txt` list. This script was not previously documented in this section.
+
+**Usage:**
+```bash
+python populate_authors.py "D:\Organized Library"
+```
+
+**Arguments:**
+
+*   **`library_directory`** (Positional, Required)
+    *   **Description**: The path to the root directory of your organized audiobook library.
+    *   **Example**: `D:\AudiobookLibrary`
+
+*   **`-f` / `--file`** (Optional)
+    *   **Description**: Specifies the path of the text file where the authors will be saved.
+    *   **Default**: `known_authors.txt` in the current directory.
+    *   **Example**: `-f "master_authors.txt"`
+
+### 7. `extract_covers.py` - The Cover Extractor
 
 A simple utility that scans a directory, finds cover art embedded in audio files, and saves it as a `.jpg` file next to the original file.
 
@@ -128,6 +214,42 @@ A simple utility that scans a directory, finds cover art embedded in audio files
 ```bash
 python extract_covers.py "C:\Path\To\Your\Audiobooks"
 ```
+
+**Arguments:**
+
+*   **`source_directory`** (Positional, Required)
+    *   **Description**: The path to the directory (and subdirectories) containing the audio files from which you want to extract the cover art.
+    *   **Example**: `C:\Audio\Temp`
+
+### 8. `find_duplicates.py` - The Duplicate Finder
+
+A powerful utility to scan your music library and find potential duplicate audio files. It offers multiple analysis modes, from a simple file count to a deep metadata scan.
+
+**Usage:**
+```bash
+# Run a deep scan based on Artist/Title tags
+python find_duplicates.py "C:\Path\To\Your\Music" --mode metadata
+
+# Run a fast scan based on similar filenames
+python find_duplicates.py "C:\Path\To\Your\Music" --mode filesystem
+
+# Quickly list folders with more than one audio file
+python find_duplicates.py "C:\Path\To\Your\Music" --mode count
+```
+
+**Arguments:**
+
+*   **`directory`** (Positional, Required)
+    *   **Description**: The path to the root directory of your music collection to scan.
+    *   **Example**: `C:\MyMusic`
+
+*   **`--mode`** (Optional)
+    *   **Description**: Specifies the analysis mode.
+    *   **Default**: `metadata`.
+    *   **Options**:
+        *   `metadata`: (Slow but accurate) Scans Artist and Title tags to find duplicates. Recommended for a thorough check.
+        *   `filesystem`: (Fast) Scans for files with similar names, ignoring track numbers and other variations.
+        *   `count`: (Very Fast) Simply lists any folder containing more than one audio file.
 
 ---
 

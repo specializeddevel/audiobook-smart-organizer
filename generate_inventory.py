@@ -6,23 +6,21 @@ import sys
 
 def generate_inventory(library_path):
     """
-    Scans a directory for metadata.json files and generates a master inventory.csv file.
+    Scans a directory for metadata.json files (in audiobookshelf format)
+    and generates a master inventory.csv file.
     """
     inventory_path = os.path.join(library_path, "inventory.csv")
     print(f"The inventory will be generated at: {inventory_path}")
 
+    # New header reflecting the audiobookshelf format
     header = [
-        "Title", "Author", "Genre", "Series", "Year", "Synopsis", "Path",
-        "ProcessingDate", "FileCount", "TotalSizeMB", "CoverArtFound"
+        "Title", "Authors", "Series", "Genres", "PublishedYear", "Description", "Path"
     ]
     
-    # A list to hold all the book data dictionaries
     all_books_data = []
 
     print("Starting scan for metadata files...")
-    # Walk through the directory structure
     for root, dirs, files in os.walk(library_path):
-        # We are looking for metadata.json files
         if "metadata.json" in files:
             json_path = os.path.join(root, "metadata.json")
             
@@ -30,22 +28,24 @@ def generate_inventory(library_path):
                 with open(json_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 
-                # The relative path should be from the library path
-                relative_path = os.path.relpath(root, library_path)
+                relative_path = os.path.relpath(root, library_path).replace('\\', '/')
                 
-                # Prepare a dictionary for the row
+                # Process list-based fields for clean CSV output
+                authors_str = ", ".join(data.get("authors", []))
+                genres_str = ", ".join(data.get("genres", []))
+                series_list = data.get("series", [])
+                series_str = ""
+                if series_list and isinstance(series_list[0], dict):
+                    series_str = series_list[0].get("name", "")
+
                 row_data = {
                     "Title": data.get("title", "Unknown"),
-                    "Author": data.get("author", "Unknown"),
-                    "Genre": data.get("genre", "Unknown"),
-                    "Series": data.get("series", "Unknown"),
-                    "Year": data.get("year", "Unknown"),
-                    "Synopsis": data.get("synopsis", "Unknown"),
-                    "Path": relative_path.replace('\\', '/'), # Use forward slashes for consistency
-                    "ProcessingDate": data.get("processing_date", ""),
-                    "FileCount": data.get("file_count", 0),
-                    "TotalSizeMB": data.get("total_size_mb", 0.0),
-                    "CoverArtFound": data.get("cover_art_found", False)
+                    "Authors": authors_str,
+                    "Series": series_str,
+                    "Genres": genres_str,
+                    "PublishedYear": data.get("publishedYear", ""),
+                    "Description": data.get("description", ""),
+                    "Path": relative_path
                 }
                 all_books_data.append(row_data)
                 print(f"Found and processed: {relative_path}")
@@ -59,7 +59,6 @@ def generate_inventory(library_path):
         print("No metadata.json files were found. The inventory file will not be created.")
         return
 
-    # Write all collected data to the CSV file at once
     try:
         with open(inventory_path, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=header, delimiter='|')
