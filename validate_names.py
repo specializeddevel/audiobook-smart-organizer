@@ -4,6 +4,10 @@ import argparse
 import re
 import sys
 from collections import defaultdict
+from logging_config import get_logger, close_logger
+
+# Initialize logger
+logger = get_logger(__file__)
 
 # Words that are common in audiobook folders but don't add value for identification.
 COMMON_JUNK_WORDS = [
@@ -26,7 +30,7 @@ def load_known_authors(filepath):
             # Store authors in lowercase for case-insensitive matching
             return {line.strip().lower() for line in f if line.strip()}
     except IOError as e:
-        print(f"Warning: Could not read authors file at '{filepath}'. Proceeding without it. Error: {e}")
+        logger.warning(f"Could not read authors file at '{filepath}'. Proceeding without it. Error: {e}")
         return set()
 
 def get_base_name(filename):
@@ -60,13 +64,13 @@ def validate_item_names(source_dir, authors_filepath):
     Scans a directory and identifies items with potentially invalid names.
     """
     if not os.path.isdir(source_dir):
-        print(f"Error: The directory '{source_dir}' does not exist.", file=sys.stderr)
+        logger.error(f"The directory '{source_dir}' does not exist.")
         return
 
-    print(f"Scanning directory: {source_dir}")
+    logger.info(f"Scanning directory: {source_dir}")
     known_authors = load_known_authors(authors_filepath)
     if known_authors:
-        print(f"Successfully loaded {len(known_authors)} known authors.")
+        logger.info(f"Successfully loaded {len(known_authors)} known authors.")
 
     names_to_check = defaultdict(list)
     for item in os.listdir(source_dir):
@@ -78,11 +82,11 @@ def validate_item_names(source_dir, authors_filepath):
             names_to_check[base_name].append(item + " (file)")
 
     if not names_to_check:
-        print("No subdirectories or audio files found to analyze.")
+        logger.info("No subdirectories or audio files found to analyze.")
         return
 
     problematic_items = []
-    print(f"\nFound {len(names_to_check)} unique items/groups to analyze. Analyzing names...")
+    logger.info(f"\nFound {len(names_to_check)} unique items/groups to analyze. Analyzing names...")
 
     for name, sources in names_to_check.items():
         level, reason, found_author = None, None, None
@@ -118,41 +122,44 @@ def validate_item_names(source_dir, authors_filepath):
         if level and reason:
             problematic_items.append({"name": name, "level": level, "reason": reason, "sources": sources})
 
-    print("\n--- Validation Complete ---")
+    logger.info("\n--- Validation Complete ---")
     if problematic_items:
         problematic_items.sort(key=lambda x: (x['level'], x['name']))
         error_count = sum(1 for item in problematic_items if item['level'] == 'ERROR')
         warning_count = sum(1 for item in problematic_items if item['level'] == 'WARNING')
-        print(f"Found {error_count} ERROR(s) and {warning_count} WARNING(s).")
+        logger.info(f"Found {error_count} ERROR(s) and {warning_count} WARNING(s).")
 
         for item in problematic_items:
-            print(f"\n  - Level: {item['level']}")
-            print(f"    Name/Group: '{item['name']}'")
-            print(f"    Reason: {item['reason']}")
+            logger.info(f"\n  - Level: {item['level']}")
+            logger.info(f"    Name/Group: '{item['name']}'")
+            logger.info(f"    Reason: {item['reason']}")
             source_preview = ", ".join(item['sources'][:3])
             if len(item['sources']) > 3:
                 source_preview += f", and {len(item['sources']) - 3} more"
-            print(f"    Sources: [ {source_preview} ]")
+            logger.info(f"    Sources: [ {source_preview} ]")
         
-        print("\n--- Recommendations ---")
-        print(" - For ERRORS: These names are very likely to fail classification. Rename them to a 'Title - Author' format.")
-        print(" - For WARNINGS: These names are ambiguous. Manually check if they contain both a title and an author.")
+        logger.info("\n--- Recommendations ---")
+        logger.info(" - For ERRORS: These names are very likely to fail classification. Rename them to a 'Title - Author' format.")
+        logger.info(" - For WARNINGS: These names are ambiguous. Manually check if they contain both a title and an author.")
     else:
-        print("All item and folder names seem to be suitable for processing.")
+        logger.info("All item and folder names seem to be suitable for processing.")
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Scans a directory to find items with names that might be unsuitable for automatic audiobook classification, using a list of known authors to improve accuracy.",
-        formatter_class=argparse.RawTextHelpFormatter
-    )
-    parser.add_argument("source_directory", help="The directory containing the items to analyze.")
-    parser.add_argument("--authors-file", default="known_authors.txt", help="Path to the file containing known author names (one per line). Defaults to 'known_authors.txt'.")
-    args = parser.parse_args()
+    try:
+        parser = argparse.ArgumentParser(
+            description="Scans a directory to find items with names that might be unsuitable for automatic audiobook classification, using a list of known authors to improve accuracy.",
+            formatter_class=argparse.RawTextHelpFormatter
+        )
+        parser.add_argument("source_directory", help="The directory containing the items to analyze.")
+        parser.add_argument("--authors-file", default="known_authors.txt", help="Path to the file containing known author names (one per line). Defaults to 'known_authors.txt'.")
+        args = parser.parse_args()
 
-    source_dir_abs = os.path.abspath(args.source_directory)
-    authors_filepath_abs = os.path.abspath(args.authors_file)
+        source_dir_abs = os.path.abspath(args.source_directory)
+        authors_filepath_abs = os.path.abspath(args.authors_file)
 
-    validate_item_names(source_dir_abs, authors_filepath_abs)
+        validate_item_names(source_dir_abs, authors_filepath_abs)
+    finally:
+        close_logger(logger)
 
 if __name__ == "__main__":
     main()

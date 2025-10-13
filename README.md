@@ -121,7 +121,7 @@ python ebooksort.py "C:\Source" -d "D:\Organized Library"
 
 ### 3. `write_tags.py` - The Tagger
 
-This script reads the metadata (`metadata.json`) and cover art (`cover.jpg`) for each book in your organized library and writes that information into the audio files' tags.
+This script reads the metadata (`metadata.json`) and cover art (`cover.jpg`) for each book in your organized library and writes that information into the audio files' tags. For better compatibility with different players, it writes the synopsis to both the **description and comment** fields.
 
 **Usage:**
 ```bash
@@ -130,6 +130,9 @@ python write_tags.py "D:\Organized Library" --mode smart
 
 # Find and fix missing covers across the entire library
 python write_tags.py "D:\Organized Library" --mode fix-covers
+
+# Fix empty comment tags by copying the description
+python write_tags.py "D:\Organized Library" --mode fix-comments
 ```
 
 **Arguments:**
@@ -148,6 +151,7 @@ python write_tags.py "D:\Organized Library" --mode fix-covers
         *   `tags-only`: Re-writes only the text metadata (title, author, etc.), but does not touch the cover art.
         *   `cover-only`: Updates only the cover art in the audio files, leaving other metadata intact.
         *   `fix-covers`: A special maintenance mode. It scans the library for books that do not have a `cover.jpg` file, tries to download it, and then embeds it into the corresponding audio files.
+        *   `fix-comments`: A maintenance mode that scans the library and, for any file with an empty comment tag, copies the content from the description/synopsis tag into it.
 
 *   **`--dry-run`** (Optional, Flag)
     *   **Description**: Performs a simulation of the tagging process. It prints the files that would be modified but does not save any changes to the audio files.

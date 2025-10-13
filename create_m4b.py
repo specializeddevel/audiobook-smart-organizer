@@ -6,16 +6,20 @@ import sys
 import subprocess
 import shutil
 from mutagen import File
+from logging_config import get_logger, close_logger
+
+# Initialize logger
+logger = get_logger(__file__)
 
 def check_dependencies():
     """Checks if FFmpeg and ffprobe are installed and available in the system's PATH."""
     if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
-        print("--- ERROR: FFmpeg/ffprobe not found. ---", file=sys.stderr)
-        print("FFmpeg and ffprobe are required to create M4B files.", file=sys.stderr)
-        print("Please install it and ensure it's in your system's PATH.", file=sys.stderr)
-        print("You can download it from: https://ffmpeg.org/download.html", file=sys.stderr)
+        logger.error("FFmpeg/ffprobe not found.")
+        logger.error("FFmpeg and ffprobe are required to create M4B files.")
+        logger.error("Please install it and ensure it's in your system's PATH.")
+        logger.error("You can download it from: https://ffmpeg.org/download.html")
         return False
-    print("FFmpeg and ffprobe found, proceeding...")
+    logger.info("FFmpeg and ffprobe found, proceeding...")
     return True
 
 def sort_audio_files(files):
@@ -33,7 +37,7 @@ def process_book_folder(book_path, dry_run=False):
     """
     Processes a single book folder, combining its audio files into one M4B file.
     """
-    print(f"\nProcessing book folder: {os.path.basename(book_path)}")
+    logger.info(f"\nProcessing book folder: {os.path.basename(book_path)}")
     
     # Define paths
     json_path = os.path.join(book_path, "metadata.json")
@@ -41,29 +45,29 @@ def process_book_folder(book_path, dry_run=False):
     
     # --- 1. Validations ---
     if not os.path.exists(json_path):
-        print("  - ERROR: metadata.json not found. Cannot proceed.", file=sys.stderr)
+        logger.error("metadata.json not found. Cannot proceed.")
         return
     if not os.path.exists(cover_path):
-        print("  - WARNING: cover.jpg not found. The M4B file will not have a cover.", file=sys.stderr)
+        logger.warning("cover.jpg not found. The M4B file will not have a cover.")
 
     # --- 2. Load Metadata ---
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
-        print("  - Loaded metadata.json")
+        logger.info("  - Loaded metadata.json")
     except Exception as e:
-        print(f"  - ERROR: Could not read or parse metadata.json: {e}", file=sys.stderr)
+        logger.error(f"Could not read or parse metadata.json: {e}")
         return
 
     # --- 3. Find and Sort Audio Files ---
     audio_extensions = ('.mp3', '.m4a', '.wav', '.flac', '.m4b')
     audio_files = [f for f in os.listdir(book_path) if f.lower().endswith(audio_extensions)]
     if not audio_files:
-        print("  - ERROR: No audio files found in this folder.", file=sys.stderr)
+        logger.error("No audio files found in this folder.")
         return
     
     sorted_audio_files = sort_audio_files(audio_files)
-    print(f"  - Found and sorted {len(sorted_audio_files)} audio files.")
+    logger.info(f"  - Found and sorted {len(sorted_audio_files)} audio files.")
 
     # --- 4. Generate FFmpeg Chapter Metadata File ---
     ffmpeg_meta_path = os.path.join(book_path, "ffmpeg_metadata.txt")
@@ -103,7 +107,7 @@ def process_book_folder(book_path, dry_run=False):
                     duration_s = float(result.stdout.strip())
                     duration_ms = int(duration_s * 1000)
                 except (subprocess.CalledProcessError, ValueError, FileNotFoundError) as e:
-                    print(f"    - WARNING: Could not get duration for '{filename}' using ffprobe: {e}. Skipping chapter mark.", file=sys.stderr)
+                    logger.warning(f"Could not get duration for '{filename}' using ffprobe: {e}. Skipping chapter mark.")
                     continue
 
                 start_time = total_duration_ms
@@ -124,13 +128,13 @@ def process_book_folder(book_path, dry_run=False):
         if total_duration_ms > 0:
             chapters_generated = True
 
-        print("  - Generated FFmpeg metadata and file list.")
+        logger.info("  - Generated FFmpeg metadata and file list.")
 
         # --- 5. Build and Execute FFmpeg Command ---
         output_filename = f"{sanitize_filename(metadata.get('title', 'output'))}.m4b"
         output_path = os.path.join(os.path.dirname(book_path), output_filename)
         
-        print(f"  - Target output file: {output_path}")
+        logger.info(f"  - Target output file: {output_path}")
 
         command = [
             'ffmpeg',
@@ -158,21 +162,21 @@ def process_book_folder(book_path, dry_run=False):
         ])
         
         if dry_run:
-            print("  - DRY RUN: The following FFmpeg command would be executed:")
+            logger.info("  - DRY RUN: The following FFmpeg command would be executed:")
             # Pretty print the command for readability
-            print("    " + " ".join([f'\"{c}\"' if " " in c else c for c in command]))
+            logger.info("    " + " ".join([f'\"{c}\"' if " " in c else c for c in command]))
         else:
-            print("  - Executing FFmpeg command... (This may take a moment)")
+            logger.info("  - Executing FFmpeg command... (This may take a moment)")
             result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', errors='ignore')
 
             if result.returncode == 0:
-                print("  - SUCCESS: M4B file created successfully.")
+                logger.info("  - SUCCESS: M4B file created successfully.")
             else:
-                print("  - ERROR: FFmpeg failed.", file=sys.stderr)
-                print("--- FFmpeg stdout: ---", file=sys.stderr)
-                print(result.stdout, file=sys.stderr)
-                print("--- FFmpeg stderr: ---", file=sys.stderr)
-                print(result.stderr, file=sys.stderr)
+                logger.error("FFmpeg failed.")
+                logger.error("--- FFmpeg stdout: ---")
+                logger.error(result.stdout)
+                logger.error("--- FFmpeg stderr: ---")
+                logger.error(result.stderr)
 
     finally:
         # --- 6. Cleanup ---
@@ -180,44 +184,46 @@ def process_book_folder(book_path, dry_run=False):
             os.remove(ffmpeg_meta_path)
         if os.path.exists(files_list_path):
             os.remove(files_list_path)
-        print("  - Cleaned up temporary files.")
+        logger.info("  - Cleaned up temporary files.")
 
 def sanitize_filename(name):
     """
     Cleans a string to be used as a valid filename.
     """
     import re
-    clean_name = re.sub(r'[\\/*?<>|\":]', "", name)
+    clean_name = re.sub(r'[\\/*?<>|":]', "", name)
     clean_name = clean_name.strip()
     return clean_name if clean_name else "Untitled"
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Combines all audio files in a processed book folder into a single M4B audiobook file with chapters.",
-        formatter_class=argparse.RawTextHelpFormatter
-    )
-    parser.add_argument(
-        "book_folder_path",
-        help="The path to the book's folder (e.g., 'C:\\...\\Author Name\\Book Title')."
-    )
-    parser.add_argument("--dry-run", action="store_true", help="Perform a simulation without creating the M4B file.")
-    args = parser.parse_args()
+    try:
+        parser = argparse.ArgumentParser(
+            description="Combines all audio files in a processed book folder into a single M4B audiobook file with chapters.",
+            formatter_class=argparse.RawTextHelpFormatter
+        )
+        parser.add_argument(
+            "book_folder_path",
+            help="The path to the book's folder (e.g., 'C:\\...\\Author Name\\Book Title')."
+        )
+        parser.add_argument("--dry-run", action="store_true", help="Perform a simulation without creating the M4B file.")
+        args = parser.parse_args()
 
-    if args.dry_run:
-        print("\n--- PERFORMING A DRY RUN ---")
-        print("The M4B file will not be created.\n")
+        if args.dry_run:
+            logger.info("\n--- PERFORMING A DRY RUN ---")
+            logger.info("The M4B file will not be created.\n")
 
-    if not check_dependencies():
-        sys.exit(1)
+        if not check_dependencies():
+            sys.exit(1)
 
-    book_path_abs = os.path.abspath(args.book_folder_path)
+        book_path_abs = os.path.abspath(args.book_folder_path)
 
-    if not os.path.isdir(book_path_abs):
-        print(f"Error: The specified path '{book_path_abs}' is not a valid directory.", file=sys.stderr)
-        sys.exit(1)
-        
-    process_book_folder(book_path_abs, dry_run=args.dry_run)
-    print("\n--- M4B Creation Process Finished ---")
+        if not os.path.isdir(book_path_abs):
+            logger.error(f"The specified path '{book_path_abs}' is not a valid directory.")
+            sys.exit(1)
+            
+        process_book_folder(book_path_abs, dry_run=args.dry_run)
+    finally:
+        close_logger(logger)
 
 if __name__ == "__main__":
     main()

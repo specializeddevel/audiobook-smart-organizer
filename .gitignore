@@ -15,4 +15,8 @@ dist/
 *.egg-info/
 
 # Generated inventory file
-ebooks/inventory.csvknown_authors.txt 
+ebooks/inventory.csv
+known_authors.txt
+
+# Log files
+process.log

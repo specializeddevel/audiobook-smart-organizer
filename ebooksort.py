@@ -11,15 +11,19 @@ import datetime
 from collections import defaultdict
 import requests
 from ddgs import DDGS
+from logging_config import get_logger, close_logger
+
+# Initialize logger
+logger = get_logger(__file__)
 
 # Configure the Gemini API using an environment variable
 try:
     GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
     genai.configure(api_key=GOOGLE_API_KEY)
     model = genai.GenerativeModel('gemini-2.5-flash')
-    print("Gemini API configured successfully.")
+    logger.info("Gemini API configured successfully.")
 except KeyError:
-    print("Error: The GOOGLE_API_KEY environment variable is not set.")
+    logger.error("The GOOGLE_API_KEY environment variable is not set.")
     exit()
 
 # Supported audio extensions
@@ -39,17 +43,17 @@ def add_author_to_known_list(author_name, filepath="known_authors.txt", dry_run=
             if not dry_run:
                 with open(filepath, 'a', encoding='utf-8') as f:
                     f.write(author_to_add + '\n')
-                print(f"  - Author '{author_to_add}' added to known authors list.")
+                logger.info(f"  - Author '{author_to_add}' added to known authors list.")
             else:
-                print(f"  - DRY RUN: Would add author '{author_to_add}' to known authors list.")
+                logger.info(f"  - DRY RUN: Would add author '{author_to_add}' to known authors list.")
     except IOError as e:
-        print(f"  - WARNING: Could not read or write to authors file '{filepath}': {e}")
+        logger.warning(f"Could not read or write to authors file '{filepath}': {e}")
 
 def get_book_info_from_gemini(info_string, dry_run=False):
     if dry_run:
-        print(f"DRY RUN: Would call Gemini API for info string: '{info_string}'")
+        logger.info(f"DRY RUN: Would call Gemini API for info string: '{info_string}'")
         return {"title": f"Title for {info_string}", "author": "Mock Author", "genre": "Mock Genre", "series": "Mock Series", "year": "2023", "synopsis": "This is a mock synopsis from a dry run."}
-    prompt = f"""Analyze the following name: '{info_string}'. Extract: Book Title, Book Author, Series (if applicable), Publication Year, Genre, and a brief Synopsis. Format the response as 'Title: <title> / Author: <author> / Genre: <genre> / Series: <series> / Year: <year> / Synopsis: <synopsis>'. If a field cannot be determined, use "Unknown", except for the Title. Provide synopsis in both Spanish and English."""
+    prompt = f'''Analyze the following name: '{info_string}'. Extract: Book Title, Book Author, Series (if applicable), Publication Year, Genre, and a brief Synopsis. Format the response as 'Title: <title> / Author: <author> / Genre: <genre> / Series: <series> / Year: <year> / Synopsis: <synopsis>'. If a field cannot be determined, use "Unknown", except for the Title. Provide synopsis in both Spanish and English.'''
     try:
         response = model.generate_content(prompt)
         result = response.text.strip()
@@ -66,10 +70,10 @@ def get_book_info_from_gemini(info_string, dry_run=False):
         series = data.get("Series", "Unknown")
         year = data.get("Year", "Unknown")
         synopsis = data.get("Synopsis", "Unknown")
-        print(f"Title: {title}\nAuthor: {author}\nGenre: {genre}\nSeries: {series}\nYear: {year}\nSynopsis: {synopsis}")
+        logger.info(f"Title: {title}\nAuthor: {author}\nGenre: {genre}\nSeries: {series}\nYear: {year}\nSynopsis: {synopsis}")
         return {"title": title, "author": author, "genre": genre, "series": series, "year": year, "synopsis": synopsis}
     except Exception as e:
-        print(f"Error contacting Gemini: {e}")
+        logger.error(f"Error contacting Gemini: {e}")
         return None
     finally:
         time.sleep(4)
@@ -92,13 +96,13 @@ def extract_cover_art(file_path, title_dir, dry_run=False):
             if not dry_run:
                 with open(os.path.join(title_dir, "cover.jpg"), "wb") as img_file:
                     img_file.write(artwork)
-                print("  - Cover art extracted and saved.")
+                logger.info("  - Cover art extracted and saved.")
             else:
-                print("  - DRY RUN: Would extract and save cover art as cover.jpg")
+                logger.info("  - DRY RUN: Would extract and save cover art as cover.jpg")
             return True
         return False
     except Exception as e:
-        print(f"  - Could not process file for cover art: {e}")
+        logger.warning(f"Could not process file for cover art: {e}")
         return False
 
 def handle_existing_cover_file(source_folder, destination_folder, dry_run=False):
@@ -108,12 +112,12 @@ def handle_existing_cover_file(source_folder, destination_folder, dry_run=False)
             source_image_path = os.path.join(source_folder, file)
             destination_image_path = os.path.join(destination_folder, "cover.jpg")
             if os.path.exists(destination_image_path):
-                print(f"  - A 'cover.jpg' already exists. Skipping move of '{file}'.")
+                logger.info(f"  - A 'cover.jpg' already exists. Skipping move of '{file}'.")
                 if not dry_run: os.remove(source_image_path)
-                else: print(f"  - DRY RUN: Would remove redundant source image: '{source_image_path}'")
+                else: logger.info(f"  - DRY RUN: Would remove redundant source image: '{source_image_path}'")
                 return True
             if not dry_run: shutil.move(source_image_path, destination_image_path)
-            print(f"  - {'DRY RUN: Would move' if dry_run else 'Found and moved'} existing cover file: '{file}'")
+            logger.info(f"  - {'DRY RUN: Would move' if dry_run else 'Found and moved'} existing cover file: '{file}'")
             return True
     return False
 
@@ -140,40 +144,40 @@ def pre_organize_into_folders(source_dir, staging_dir, dry_run=False):
     if not dry_run: os.makedirs(staging_dir, exist_ok=True)
     supported_images = ('.jpg', '.jpeg', '.png')
     base_name_map = defaultdict(list)
-    print("Scanning and grouping source directory...")
+    logger.info("Scanning and grouping source directory...")
     for item in os.listdir(source_dir):
         source_path = os.path.join(source_dir, item)
         if os.path.abspath(source_path) == os.path.abspath(staging_dir): continue
         if os.path.isdir(source_path):
             if not dry_run: shutil.move(source_path, os.path.join(staging_dir, item))
-            print(f"{'DRY RUN: Would move' if dry_run else 'Moving'} existing folder '{item}' to staging area.")
+            logger.info(f"{ 'DRY RUN: Would move' if dry_run else 'Moving'} existing folder '{item}' to staging area.")
             continue
         if item.lower().endswith(AUDIO_EXTENSIONS) or item.lower().endswith(supported_images):
             base_name = get_base_name(item)
             if base_name: base_name_map[base_name].append(item)
-    print(f"Found {len(base_name_map)} potential groups among loose files.")
+    logger.info(f"Found {len(base_name_map)} potential groups among loose files.")
     for base_name, file_list in base_name_map.items():
         if not any(f.lower().endswith(AUDIO_EXTENSIONS) for f in file_list): continue
         folder_name = sanitize_filename(base_name.title())
         dest_folder = os.path.join(staging_dir, folder_name)
         if not dry_run: os.makedirs(dest_folder, exist_ok=True)
-        print(f"\nCreating group '{folder_name}' with {len(file_list)} file(s).")
+        logger.info(f"\nCreating group '{folder_name}' with {len(file_list)} file(s).")
         for file in file_list:
             source_file_path = os.path.join(source_dir, file)
             if os.path.exists(source_file_path):
                 if not dry_run: shutil.move(source_file_path, os.path.join(dest_folder, file))
-                print(f"  - {'DRY RUN: Would move' if dry_run else 'Moved'} '{file}' to folder '{folder_name}'")
+                logger.info(f"  - {'DRY RUN: Would move' if dry_run else 'Moved'} '{file}' to folder '{folder_name}'")
 
 def download_cover_from_internet(book_data, title_dir, dry_run=False):
     if dry_run:
-        print(f"  - DRY RUN: Would search online for cover for title: '{book_data.get('title')}'")
+        logger.info(f"  - DRY RUN: Would search online for cover for title: '{book_data.get('title')}'")
         return False
     try:
         title = book_data.get("title", "")
         author = book_data.get("author", "")
         if not title or title == "Unknown" or not author or author == "Unknown": return False
         keywords = f'{title} {author} book cover'
-        print(f"  - Searching for cover online with keywords: \"{keywords}\"")
+        logger.info(f"  - Searching for cover online with keywords: \"{keywords}\"")
         with DDGS() as ddgs:
             results = list(ddgs.images(keywords, max_results=5))
         if not results: return False
@@ -181,10 +185,10 @@ def download_cover_from_internet(book_data, title_dir, dry_run=False):
         response.raise_for_status()
         with open(os.path.join(title_dir, "cover.jpg"), 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
-        print("  - Successfully downloaded and saved cover.jpg.")
+        logger.info("  - Successfully downloaded and saved cover.jpg.")
         return True
     except Exception as e:
-        print(f"  - ERROR: Failed to download cover: {e}")
+        logger.error(f"Failed to download cover: {e}")
         return False
 
 def organize_audio_files(base_dir, dest_dir, dry_run=False):
@@ -193,8 +197,8 @@ def organize_audio_files(base_dir, dest_dir, dry_run=False):
         os.makedirs(dest_dir, exist_ok=True)
         os.makedirs(unclassified_dir, exist_ok=True)
     else:
-        print(f"DRY RUN: Would ensure destination directory exists: {dest_dir}")
-        print(f"DRY RUN: Would ensure unclassified directory exists: {unclassified_dir}")
+        logger.info(f"DRY RUN: Would ensure destination directory exists: {dest_dir}")
+        logger.info(f"DRY RUN: Would ensure unclassified directory exists: {unclassified_dir}")
     books_without_cover = []
     if dry_run and not os.path.exists(base_dir): return books_without_cover
     for root, _, files in os.walk(base_dir):
@@ -202,9 +206,9 @@ def organize_audio_files(base_dir, dest_dir, dry_run=False):
         try:
             audio_files = [f for f in files if f.lower().endswith(AUDIO_EXTENSIONS)]
             if not audio_files: continue
-            print(f"\nProcessing group from folder: {os.path.basename(root)}")
+            logger.info(f"\nProcessing group from folder: {os.path.basename(root)}")
             gemini_info_string = os.path.basename(root)
-            print(f"Using '{gemini_info_string}' to get book information...")
+            logger.info(f"Using '{gemini_info_string}' to get book information...")
             book_data = get_book_info_from_gemini(gemini_info_string, dry_run=dry_run)
             if book_data and book_data["title"] != "Unknown":
                 add_author_to_known_list(book_data["author"], dry_run=dry_run)
@@ -214,14 +218,14 @@ def organize_audio_files(base_dir, dest_dir, dry_run=False):
                 author_dir = os.path.join(dest_dir, author_folder_name)
                 title_dir = os.path.join(author_dir, title_folder_name)
                 if not dry_run: os.makedirs(title_dir, exist_ok=True)
-                else: print(f"DRY RUN: Would ensure book directory exists: {title_dir}")
-                print("Searching for cover art...")
+                else: logger.info(f"DRY RUN: Would ensure book directory exists: {title_dir}")
+                logger.info("Searching for cover art...")
                 cover_art_found = handle_existing_cover_file(root, title_dir, dry_run=dry_run)
                 if not cover_art_found: cover_art_found = extract_cover_art(os.path.join(root, audio_files[0]), title_dir, dry_run=dry_run)
                 if not cover_art_found: cover_art_found = download_cover_from_internet(book_data, title_dir, dry_run=dry_run)
-                if cover_art_found: print("Cover art processing complete.")
+                if cover_art_found: logger.info("Cover art processing complete.")
                 else: books_without_cover.append(relative_path)
-                print("Analyzing audio files for chapter generation...")
+                logger.info("Analyzing audio files for chapter generation...")
                 chapters = []
                 current_time_s = 0.0
                 sorted_audio_files_for_chapters = sorted([f for f in os.listdir(root) if f.lower().endswith(AUDIO_EXTENSIONS)])
@@ -233,27 +237,27 @@ def organize_audio_files(base_dir, dest_dir, dry_run=False):
                             duration_s = audio_info.info.length
                             chapters.append({"id": i, "start": current_time_s, "end": current_time_s + duration_s, "title": os.path.splitext(filename)[0].replace('_', ' ').title()})
                             current_time_s += duration_s
-                    except Exception as e: print(f"    - Warning: Error processing '{filename}' for duration: {e}")
+                    except Exception as e: logger.warning(f"Error processing '{filename}' for duration: {e}")
                 author = book_data.get("author", "Unknown")
                 series = book_data.get("series", "Unknown")
                 genre = book_data.get("genre", "Unknown")
                 audiobookshelf_data = {"tags": [], "chapters": chapters, "title": book_data.get("title", "Unknown"), "subtitle": None, "authors": [] if author == "Unknown" else [author], "narrators": [], "series": [] if series == "Unknown" else [{"name": series}], "genres": [] if genre == "Unknown" else [genre], "publishedYear": book_data.get("year", None), "publishedDate": None, "publisher": None, "description": book_data.get("synopsis", None), "isbn": None, "asin": None, "language": None, "explicit": False, "abridged": False}
                 if not dry_run:
                     with open(os.path.join(title_dir, "metadata.json"), "w", encoding="utf-8") as f: json.dump(audiobookshelf_data, f, ensure_ascii=False, indent=2)
-                    print("Metadata saved to metadata.json in audiobookshelf format.")
-                else: print(f"DRY RUN: Would save metadata.json to: {title_dir}")
+                    logger.info("Metadata saved to metadata.json in audiobookshelf format.")
+                else: logger.info(f"DRY RUN: Would save metadata.json to: {title_dir}")
                 for file in audio_files:
                     if not dry_run: shutil.move(os.path.join(root, file), os.path.join(title_dir, file))
-                    print(f"{'DRY RUN: Would move' if dry_run else 'Moved'} file '{file}' to '{title_dir}'")
+                    logger.info(f"{ 'DRY RUN: Would move' if dry_run else 'Moved'} file '{file}' to '{title_dir}'")
                 if not dry_run:
                     try: os.rmdir(root)
-                    except OSError as e: print(f"Warning: Could not delete temporary folder '{root}': {e}")
-                else: print(f"DRY RUN: Would delete temporary book folder: {root}")
+                    except OSError as e: logger.warning(f"Could not delete temporary folder '{root}': {e}")
+                else: logger.info(f"DRY RUN: Would delete temporary book folder: {root}")
             else:
-                print(f"Could not classify group '{os.path.basename(root)}'. Moving to 'unclassified'.")
+                logger.info(f"Could not classify group '{os.path.basename(root)}'. Moving to 'unclassified'.")
                 if not dry_run: shutil.move(root, find_unique_foldername(os.path.join(unclassified_dir, os.path.basename(root))))
-                else: print(f"DRY RUN: Would move group '{os.path.basename(root)}' to 'unclassified'.")
-        except Exception as e: print(f"\n--- ERROR processing folder: {os.path.basename(root)} ---\nAn unexpected error occurred: {e}\nThis folder will be skipped and will remain in the staging directory for manual review.")
+                else: logger.info(f"DRY RUN: Would move group '{os.path.basename(root)}' to 'unclassified'.")
+        except Exception as e: logger.error(f"--- ERROR processing folder: {os.path.basename(root)} ---\nAn unexpected error occurred: {e}\nThis folder will be skipped and will remain in the staging directory for manual review.")
         finally:
             if not dry_run: time.sleep(2)
     return books_without_cover
@@ -267,36 +271,38 @@ def main():
     source_dir_abs = os.path.abspath(args.source_directory)
     if args.destination_directory: dest_dir_abs = os.path.abspath(args.destination_directory)
     else: dest_dir_abs = source_dir_abs
-    if not os.path.isdir(source_dir_abs): print(f"\nError: The source directory '{source_dir_abs}' does not exist or is not a directory."); return
-    if args.dry_run: print("\n--- PERFORMING A DRY RUN ---\nNo files will be moved, deleted, or modified. No APIs will be called.\n")
+    if not os.path.isdir(source_dir_abs): logger.error(f"The source directory '{source_dir_abs}' does not exist or is not a directory."); return
+    if args.dry_run: logger.info("\n--- PERFORMING A DRY RUN ---\nNo files will be moved, deleted, or modified. No APIs will be called.\n")
     parent_dir = os.path.dirname(source_dir_abs)
     staging_dir = os.path.join(parent_dir, f"_ebooksort_staging_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}")
     try:
         if not args.dry_run: os.makedirs(staging_dir, exist_ok=True)
-        else: print(f"DRY RUN: Would create staging directory: {staging_dir}")
-        print(f"Source Directory: {source_dir_abs}\nDestination Directory: {dest_dir_abs}\nUsing safe staging directory: {staging_dir}")
-        print("\n--- Phase 1: Grouping files into staging area ---")
+        else: logger.info(f"DRY RUN: Would create staging directory: {staging_dir}")
+        logger.info(f"Source Directory: {source_dir_abs}\nDestination Directory: {dest_dir_abs}\nUsing safe staging directory: {staging_dir}")
+        logger.info("\n--- Phase 1: Grouping files into staging area ---")
         pre_organize_into_folders(source_dir_abs, staging_dir, dry_run=args.dry_run)
-        print("\n--- Phase 2: Classifying and organizing folders ---")
+        logger.info("\n--- Phase 2: Classifying and organizing folders ---")
         books_without_cover = organize_audio_files(staging_dir, dest_dir_abs, dry_run=args.dry_run)
-        print(f"\nProcess finished. Checking for unprocessed items in staging area...")
+        logger.info(f"\nProcess finished. Checking for unprocessed items in staging area...")
         if args.dry_run and not os.path.exists(staging_dir): remaining_items = []
         else: remaining_items = os.listdir(staging_dir)
         if not remaining_items:
-            print("Staging directory is empty. Cleaning up.")
+            logger.info("Staging directory is empty. Cleaning up.")
             if not args.dry_run: shutil.rmtree(staging_dir)
-            else: print(f"DRY RUN: Would delete staging directory: {staging_dir}")
+            else: logger.info(f"DRY RUN: Would delete staging directory: {staging_dir}")
         else:
-            print("\n--- WARNING: Items remain in the staging directory ---")
-            for item in remaining_items: print(f"  - {item}")
-            print(f"Staging directory location: {staging_dir}")
+            logger.warning("--- Items remain in the staging directory ---")
+            for item in remaining_items: logger.info(f"  - {item}")
+            logger.info(f"Staging directory location: {staging_dir}")
         if books_without_cover:
-            print("\n--- Books Missing Covers ---")
-            for book_path in sorted(books_without_cover): print(f"  - {book_path}")
+            logger.info("\n--- Books Missing Covers ---")
+            for book_path in sorted(books_without_cover): logger.info(f"  - {book_path}")
     except (KeyboardInterrupt, Exception) as e:
-        print(f"\n--- A CRITICAL ERROR OCCURRED ---\nThe script was interrupted by: {type(e).__name__}")
-        if os.path.exists(staging_dir): print(f"\nYour files are safe in the staging directory:\n  -> {staging_dir}")
-        print("Please review the folder and the error messages before running the script again.")
+        logger.critical(f"--- A CRITICAL ERROR OCCURRED ---\nThe script was interrupted by: {type(e).__name__}")
+        if os.path.exists(staging_dir): logger.info(f"\nYour files are safe in the staging directory:\n  -> {staging_dir}")
+        logger.info("Please review the folder and the error messages before running the script again.")
+    finally:
+        close_logger(logger)
 
 if __name__ == "__main__":
     main()

@@ -3,6 +3,10 @@ import os
 import argparse
 import sys
 import mutagen
+from logging_config import get_logger, close_logger
+
+# Initialize logger
+logger = get_logger(__file__)
 
 # Supported audio extensions
 AUDIO_EXTENSIONS = ('.mp3', '.m4a', '.m4b', '.flac', '.wav')
@@ -46,7 +50,7 @@ def extract_cover(audio_path):
         if artwork:
             with open(cover_path, "wb") as img_file:
                 img_file.write(artwork)
-            print(f"  - SUCCESS: Extracted cover for: {os.path.basename(audio_path)}")
+            logger.info(f"  - SUCCESS: Extracted cover for: {os.path.basename(audio_path)}")
             return True
         else:
             # File is valid, but contains no cover art
@@ -56,14 +60,14 @@ def extract_cover(audio_path):
         # This can happen for files that look like audio but are corrupt or unsupported
         return False
     except Exception as e:
-        print(f"  - ERROR processing {os.path.basename(audio_path)}: {e}")
+        logger.error(f"  - ERROR processing {os.path.basename(audio_path)}: {e}")
         return False
 
 def scan_and_extract(source_dir):
     """
     Scans a directory for audio files and attempts to extract embedded cover art.
     """
-    print(f"Scanning directory: {source_dir}\n")
+    logger.info(f"Scanning directory: {source_dir}\n")
     
     audio_files_found = []
     # Find all audio files recursively
@@ -73,14 +77,14 @@ def scan_and_extract(source_dir):
                 audio_files_found.append(os.path.join(root, file))
 
     if not audio_files_found:
-        print("No audio files found in the specified directory.")
+        logger.info("No audio files found in the specified directory.")
         return
 
     total_files = len(audio_files_found)
     covers_extracted = 0
     files_truly_missing_cover = []
 
-    print(f"Found {total_files} audio file(s). Starting extraction process...")
+    logger.info(f"Found {total_files} audio file(s). Starting extraction process...")
     for audio_file in audio_files_found:
         if extract_cover(audio_file):
             covers_extracted += 1
@@ -91,37 +95,40 @@ def scan_and_extract(source_dir):
             if not os.path.exists(base_name + ".jpg"):
                  files_truly_missing_cover.append(os.path.basename(audio_file))
 
-    print("\n--- Extraction Complete ---")
-    print(f"Total audio files processed: {total_files}")
-    print(f"New covers extracted: {covers_extracted}")
+    logger.info("\n--- Extraction Complete ---")
+    logger.info(f"Total audio files processed: {total_files}")
+    logger.info(f"New covers extracted: {covers_extracted}")
     
     # Report on files that still don't have a cover image file next to them.
     if files_truly_missing_cover:
-        print(f"\nFiles that may be missing a cover ({len(files_truly_missing_cover)}):")
+        logger.warning(f"\nFiles that may be missing a cover ({len(files_truly_missing_cover)}):")
         for filename in files_truly_missing_cover:
-            print(f"  - {filename}")
+            logger.warning(f"  - {filename}")
     else:
-        print("\nIt seems all audio files have a corresponding cover image.")
+        logger.info("\nIt seems all audio files have a corresponding cover image.")
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Extracts embedded cover art from audio files in a directory.",
-        formatter_class=argparse.RawTextHelpFormatter
-    )
-    parser.add_argument(
-        "source_directory",
-        help="The directory containing audio files to scan."
-    )
-    args = parser.parse_args()
+    try:
+        parser = argparse.ArgumentParser(
+            description="Extracts embedded cover art from audio files in a directory.",
+            formatter_class=argparse.RawTextHelpFormatter
+        )
+        parser.add_argument(
+            "source_directory",
+            help="The directory containing audio files to scan."
+        )
+        args = parser.parse_args()
 
-    source_dir_abs = os.path.abspath(args.source_directory)
+        source_dir_abs = os.path.abspath(args.source_directory)
 
-    if not os.path.isdir(source_dir_abs):
-        print(f"Error: The specified directory '{source_dir_abs}' does not exist.", file=sys.stderr)
-        sys.exit(1)
-        
-    scan_and_extract(source_dir_abs)
+        if not os.path.isdir(source_dir_abs):
+            logger.error(f"The specified directory '{source_dir_abs}' does not exist.")
+            sys.exit(1)
+            
+        scan_and_extract(source_dir_abs)
+    finally:
+        close_logger(logger)
 
 if __name__ == "__main__":
     main()
