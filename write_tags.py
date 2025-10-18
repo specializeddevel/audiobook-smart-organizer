@@ -383,9 +383,10 @@ def main():
             
             if args.mode == 'fix-covers':
                 for root, dirs, files in os.walk(target_path_abs):
-                    if "metadata.json" in files:
+                    metadata_filename = next((f for f in files if f.lower() == 'metadata.json'), None)
+                    if metadata_filename:
                         logger.info(f"\nChecking book: {os.path.basename(root)}")
-                        json_path = os.path.join(root, "metadata.json")
+                        json_path = os.path.join(root, metadata_filename)
                         cover_path = os.path.join(root, "cover.jpg")
                         cover_was_newly_downloaded = False
                         
@@ -397,7 +398,8 @@ def main():
                                     if download_cover_from_internet(metadata, root, dry_run=args.dry_run):
                                         logger.info("  - Download successful.")
                                         cover_was_newly_downloaded = True
-                                        metadata['cover_art_found'] = True # This key doesn't exist in new format, but is harmless
+                                        # This key doesn't exist in new format, but is harmless
+                                        metadata['cover_art_found'] = True 
                                         if not args.dry_run:
                                             f.seek(0)
                                             json.dump(metadata, f, ensure_ascii=False, indent=4)
@@ -432,6 +434,7 @@ def main():
                         finally:
                             if not args.dry_run:
                                 time.sleep(config.gemini['api_cooldown'])
+                            # Stop descending into this folder
                             dirs[:] = []
                 
                 logger.info("\n--- Fix Covers Finished ---")
@@ -446,18 +449,26 @@ def main():
                 return
 
             marker_filename = config.tagging['marker_filename']
+            found_books = False
             for root, dirs, files in os.walk(target_path_abs):
-                if "metadata.json" in files:
+                metadata_filename = next((f for f in files if f.lower() == 'metadata.json'), None)
+                if metadata_filename:
+                    found_books = True
                     marker_filepath = os.path.join(root, marker_filename)
 
                     if args.mode == 'smart' and os.path.exists(marker_filepath):
                         logger.info(f"\nSkipping folder (already processed): {os.path.basename(root)}")
                         dirs[:] = []
                         continue
-
+                    
+                    # Pass the correct metadata filename to the processing function
                     process_book_folder(root, marker_filepath, args.mode, dry_run=args.dry_run)
+                    # Stop descending into this folder
                     dirs[:] = [] 
             
+            if not found_books:
+                logger.warning("Scan complete. No directories containing 'metadata.json' were found to process.")
+
             logger.info("\n--- Tagger Finished ---")
             return
     finally:

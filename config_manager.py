@@ -22,6 +22,7 @@ class ConfigManager:
             'image_extensions': tuple(self._get_list('General', 'image_extensions')),
             'log_filename': self.config.get('General', 'log_filename'),
             'authors_filename': self.config.get('General', 'authors_filename'),
+            'no_cover_folder': self.config.get('General', 'no_cover_folder'),
         }
 
     @property
