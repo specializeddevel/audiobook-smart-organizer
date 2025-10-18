@@ -4,9 +4,15 @@ import json
 import argparse
 import sys
 from logging_config import get_logger, close_logger
+from config_manager import config
 
 # Initialize logger
 logger = get_logger(__file__)
+
+# Exit if the configuration failed to load
+if not config:
+    logger.error("Configuration could not be loaded. Please check for a valid config.ini file.")
+    sys.exit(1)
 
 def add_author_to_known_list(author_name, filepath, existing_authors_set):
     """
@@ -63,11 +69,16 @@ def scan_library_for_authors(library_path, authors_filepath):
                 with open(json_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 
-                author = data.get("author")
-                if author:
-                    if add_author_to_known_list(author, authors_filepath, existing_authors):
+                # Handle both old and new metadata formats
+                authors = data.get("authors", [])
+                if not authors:
+                    author = data.get("author")
+                    if author: authors = [author]
+
+                for author_name in authors:
+                    if add_author_to_known_list(author_name, authors_filepath, existing_authors):
                         new_authors_count += 1
-                        logger.info(f"  - Found new author: '{author.strip().title()}' in '{os.path.basename(root)}'")
+                        logger.info(f"  - Found new author: '{author_name.strip().title()}' in '{os.path.basename(root)}'")
 
             except json.JSONDecodeError:
                 logger.warning(f"Could not decode JSON from '{json_path}'. Skipping.")
@@ -91,13 +102,15 @@ def main():
         )
         parser.add_argument(
             "-f", "--file",
-            default="known_authors.txt",
-            help="The path to the authors file to populate. Defaults to 'known_authors.txt' in the current directory."
+            default=None,
+            help=f"The path to the authors file to populate. Defaults to '{config.general['authors_filename']}' from config."
         )
         args = parser.parse_args()
 
         library_path_abs = os.path.abspath(args.library_directory)
-        authors_filepath_abs = os.path.abspath(args.file)
+        
+        # Use the argument if provided, otherwise fall back to the config default
+        authors_filepath_abs = os.path.abspath(args.file) if args.file else os.path.abspath(config.general['authors_filename'])
 
         if not os.path.isdir(library_path_abs):
             logger.error(f"The specified library directory '{library_path_abs}' does not exist.")

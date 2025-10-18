@@ -4,16 +4,23 @@ import csv
 import argparse
 import sys
 from logging_config import get_logger, close_logger
+from config_manager import config
 
 # Initialize logger
 logger = get_logger(__file__)
+
+# Exit if the configuration failed to load
+if not config:
+    logger.error("Configuration could not be loaded. Please check for a valid config.ini file.")
+    sys.exit(1)
 
 def generate_inventory(library_path):
     """
     Scans a directory for metadata.json files (in audiobookshelf format)
     and generates a master inventory.csv file.
     """
-    inventory_path = os.path.join(library_path, "inventory.csv")
+    inventory_filename = config.inventory['inventory_filename']
+    inventory_path = os.path.join(library_path, inventory_filename)
     logger.info(f"The inventory will be generated at: {inventory_path}")
 
     # New header reflecting the audiobookshelf format
@@ -65,7 +72,8 @@ def generate_inventory(library_path):
 
     try:
         with open(inventory_path, 'w', newline='', encoding='utf-8') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=header, delimiter='|')
+            delimiter = config.inventory['csv_delimiter']
+            writer = csv.DictWriter(csvfile, fieldnames=header, delimiter=delimiter)
             writer.writeheader()
             writer.writerows(all_books_data)
         logger.info(f"\nSuccessfully generated inventory with {len(all_books_data)} books.")

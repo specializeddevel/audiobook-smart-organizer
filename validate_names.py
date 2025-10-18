@@ -5,19 +5,15 @@ import re
 import sys
 from collections import defaultdict
 from logging_config import get_logger, close_logger
+from config_manager import config
 
 # Initialize logger
 logger = get_logger(__file__)
 
-# Words that are common in audiobook folders but don't add value for identification.
-COMMON_JUNK_WORDS = [
-    'audiobook', 'audiolibro', 'unabridged', 'completo', 'full', 'original',
-    'dramatizado', 'libro', 'book', 'audible', 'version', 'edicion', 'unknown',
-    'official', 'oficial', 'retail'
-]
-
-# Supported audio extensions to check for loose files.
-AUDIO_EXTENSIONS = ('.mp3', '.m4a', '.wav', '.flac', '.m4b')
+# Exit if the configuration failed to load
+if not config:
+    logger.error("Configuration could not be loaded. Please check for a valid config.ini file.")
+    sys.exit(1)
 
 def load_known_authors(filepath):
     """
@@ -53,11 +49,16 @@ def get_base_name(filename):
 
 def clean_name_for_validation(name):
     """
-    Cleans a name for analysis by removing junk words.
+    Cleans a name for analysis by removing junk words from the config.
     """
-    junk_pattern = r'\b(' + '|'.join(re.escape(word) for word in COMMON_JUNK_WORDS) + r')\b'
+    junk_words = config.validation['junk_words']
+    junk_pattern = r'\b(' + '|'.join(re.escape(word) for word in junk_words) + r')\b'
     cleaned = re.sub(junk_pattern, '', name, flags=re.IGNORECASE)
     return ' '.join(cleaned.split())
+
+def has_separator(name):
+    """Checks if the name contains any of the configured separators."""
+    return any(sep in name for sep in config.validation['name_separators'])
 
 def validate_item_names(source_dir, authors_filepath):
     """
@@ -72,12 +73,13 @@ def validate_item_names(source_dir, authors_filepath):
     if known_authors:
         logger.info(f"Successfully loaded {len(known_authors)} known authors.")
 
+    audio_extensions = config.general['audio_extensions']
     names_to_check = defaultdict(list)
     for item in os.listdir(source_dir):
         full_path = os.path.join(source_dir, item)
         if os.path.isdir(full_path):
             names_to_check[item].append(item + "/ (directory)")
-        elif item.lower().endswith(AUDIO_EXTENSIONS):
+        elif item.lower().endswith(audio_extensions):
             base_name = get_base_name(item)
             names_to_check[base_name].append(item + " (file)")
 
@@ -88,19 +90,24 @@ def validate_item_names(source_dir, authors_filepath):
     problematic_items = []
     logger.info(f"\nFound {len(names_to_check)} unique items/groups to analyze. Analyzing names...")
 
+    # Get thresholds from config
+    short_word_count = config.validation['short_name_word_count']
+    ambiguous_word_count = config.validation['ambiguous_name_word_count']
+
     for name, sources in names_to_check.items():
         level, reason, found_author = None, None, None
         original_name_lower = name.lower()
 
         if 'unknown' in original_name_lower:
             level, reason = "ERROR", "Name contains the word 'unknown'."
-        elif ' by ' in original_name_lower or ' por ' in original_name_lower or ' - ' in name:
-            parts = re.split(r' by | por | - ', name, maxsplit=1)
+        elif has_separator(name):
+            # Use a regex to split by any of the separators
+            separator_pattern = '|'.join(re.escape(sep) for sep in config.validation['name_separators'])
+            parts = re.split(separator_pattern, name, maxsplit=1)
             if not parts[0].strip() or not parts[1].strip():
                 level, reason = "ERROR", "Name has a separator but one side is empty."
         else:
             # If no separator, check for a known author in the name
-            # Sort by length to match longer names first (e.g., "Stephen King" before "King")
             for author in sorted(known_authors, key=len, reverse=True):
                 if author in original_name_lower:
                     found_author = author
@@ -114,9 +121,9 @@ def validate_item_names(source_dir, authors_filepath):
 
                 if not cleaned or all(word.isdigit() for word in words):
                     level, reason = "ERROR", "Name is empty, junk, or consists only of numbers."
-                elif word_count <= 2:
+                elif word_count <= short_word_count:
                     level, reason = "ERROR", f"Name is too short ({word_count} words) and lacks a separator or known author."
-                elif word_count <= 4:
+                elif word_count <= ambiguous_word_count:
                     level, reason = "WARNING", f"Name is ambiguous ({word_count} words) and lacks a separator or known author. Please review."
 
         if level and reason:
@@ -151,11 +158,13 @@ def main():
             formatter_class=argparse.RawTextHelpFormatter
         )
         parser.add_argument("source_directory", help="The directory containing the items to analyze.")
-        parser.add_argument("--authors-file", default="known_authors.txt", help="Path to the file containing known author names (one per line). Defaults to 'known_authors.txt'.")
+        parser.add_argument("--authors-file", default=None, help=f"Path to the authors file. Defaults to '{config.general['authors_filename']}' from config.")
         args = parser.parse_args()
 
         source_dir_abs = os.path.abspath(args.source_directory)
-        authors_filepath_abs = os.path.abspath(args.authors_file)
+        
+        # Use the argument if provided, otherwise fall back to the config default
+        authors_filepath_abs = os.path.abspath(args.authors_file) if args.authors_file else os.path.abspath(config.general['authors_filename'])
 
         validate_item_names(source_dir_abs, authors_filepath_abs)
     finally:

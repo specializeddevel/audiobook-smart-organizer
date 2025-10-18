@@ -53,6 +53,28 @@ export GOOGLE_API_KEY="YOUR_API_KEY_HERE"
 ```
 *(To make this permanent, add this line to your `~/.bashrc` or `~/.zshrc` file).*
 
+### 3. Review and Customize Configuration (Optional)
+
+This project uses a central configuration file, `config.ini`, to control the behavior of the scripts. Before running, you can open this file and customize settings like the AI model, supported file types, and validation rules.
+
+See the **Configuration** section below for more details.
+
+---
+
+## Configuration
+
+A major feature of this suite is that its core behavior can be customized without editing any Python code. This is all handled through the `config.ini` file.
+
+Here are some of the key settings you can change:
+
+- **`[General]`**: Define which audio and image file extensions the scripts should recognize.
+- **`[Gemini]`**: Change the AI model (`gemini-1.5-flash` by default) or even modify the prompt sent to the AI to better suit your needs or language preferences.
+- **`[Validation]`**: Adjust the rules for the `validate_names.py` script, such as adding new "junk words" to ignore or changing word count thresholds for flagging names.
+- **`[Tagging]`**: Control how metadata is written, including the format for album and track titles.
+- **`[M4B]`**: Set the audio bitrate for `.m4b` files created by `create_m4b.py`.
+
+To make a change, simply open `config.ini` in a text editor, modify the value, and save the file. The scripts will use your new settings the next time they are run.
+
 ---
 
 ## Recommended Workflow

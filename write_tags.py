@@ -11,12 +11,15 @@ from mutagen.mp4 import MP4, MP4Cover
 from mutagen.flac import FLAC, Picture
 from mutagen import File
 from logging_config import get_logger, close_logger
+from config_manager import config
 
 # Initialize logger
 logger = get_logger(__file__)
 
-# Supported audio extensions
-AUDIO_EXTENSIONS = ('.mp3', '.m4a', '.wav', '.flac', '.m4b')
+# Exit if the configuration failed to load
+if not config:
+    logger.error("Configuration could not be loaded. Please check for a valid config.ini file.")
+    sys.exit(1)
 
 def download_cover_from_internet(book_data, title_dir, dry_run=False):
     """
@@ -121,7 +124,7 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
 
         album_title = title
         if series_name:
-            album_title = f"{series_name} - {title}"
+            album_title = config.tagging['album_title_format'].format(title=title, series_name=series_name)
 
         track_title = album_title
         if total_tracks > 1:
@@ -129,7 +132,7 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
             if base_name.lower().startswith(("chapter", "capitulo", "part", "parte")):
                  track_title = base_name.replace('_', ' ').title()
             else:
-                 track_title = f"Chapter {track_num:02d}"
+                 track_title = config.tagging['track_title_format'].format(track_num=track_num, base_name=base_name)
 
         effective_mode = 'all' if mode == 'smart' else mode
 
@@ -191,7 +194,7 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
         if not dry_run:
             audio.save()
         
-        logger.info(f"      - {{'DRY RUN: Would tag' if dry_run else 'Successfully tagged'}}: {os.path.basename(file_path)}")
+        logger.info(f"      - {{ 'DRY RUN: Would tag' if dry_run else 'Successfully tagged' }}: {os.path.basename(file_path)}")
 
     except Exception as e:
         logger.error(f"      - ERROR: Failed to tag {os.path.basename(file_path)}: {e}")
@@ -255,7 +258,7 @@ def process_book_folder(book_path, marker_filepath, mode, dry_run=False):
     else:
         logger.info("  - No cover.jpg found in this folder.")
 
-    audio_files = [f for f in os.listdir(book_path) if f.lower().endswith(AUDIO_EXTENSIONS)]
+    audio_files = [f for f in os.listdir(book_path) if f.lower().endswith(config.general['audio_extensions'])]
     if not audio_files:
         logger.warning("  - No audio files found in this folder. Skipping.")
         return
@@ -312,7 +315,7 @@ def process_single_file(file_path, mode, dry_run=False):
     else:
         logger.info("  - No cover.jpg found in this folder.")
 
-    audio_files = [f for f in os.listdir(book_path) if f.lower().endswith(AUDIO_EXTENSIONS)]
+    audio_files = [f for f in os.listdir(book_path) if f.lower().endswith(config.general['audio_extensions'])]
     if not audio_files:
         logger.warning("  - No audio files found in the parent directory. Skipping.")
         return
@@ -363,8 +366,9 @@ def main():
             logger.error(f"The specified path '{target_path_abs}' does not exist.")
             sys.exit(1)
 
+        audio_extensions = config.general['audio_extensions']
         if os.path.isfile(target_path_abs):
-            if not target_path_abs.lower().endswith(AUDIO_EXTENSIONS):
+            if not target_path_abs.lower().endswith(audio_extensions):
                 logger.error("The specified file is not a supported audio format.")
                 sys.exit(1)
             
@@ -410,7 +414,7 @@ def main():
                                 with open(cover_path, 'rb') as f:
                                     cover_image_data = f.read()
                                 
-                                audio_files = [f for f in os.listdir(root) if f.lower().endswith(AUDIO_EXTENSIONS)]
+                                audio_files = [f for f in os.listdir(root) if f.lower().endswith(audio_extensions)]
                                 if not audio_files:
                                     logger.warning("  - No audio files found to tag.")
                                     continue
@@ -427,7 +431,7 @@ def main():
                         
                         finally:
                             if not args.dry_run:
-                                time.sleep(2)
+                                time.sleep(config.gemini['api_cooldown'])
                             dirs[:] = []
                 
                 logger.info("\n--- Fix Covers Finished ---")
@@ -436,12 +440,12 @@ def main():
             elif args.mode == 'fix-comments':
                 for root, dirs, files in os.walk(target_path_abs):
                     for file in files:
-                        if file.lower().endswith(AUDIO_EXTENSIONS):
+                        if file.lower().endswith(audio_extensions):
                             file_path = os.path.join(root, file)
                             fix_comment_tag(file_path, args.dry_run)
                 return
 
-            marker_filename = ".tags_written"
+            marker_filename = config.tagging['marker_filename']
             for root, dirs, files in os.walk(target_path_abs):
                 if "metadata.json" in files:
                     marker_filepath = os.path.join(root, marker_filename)
@@ -461,3 +465,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

@@ -1,6 +1,7 @@
 import logging
 import sys
 import os
+from config_manager import config
 
 def setup_logging(script_name=None):
     """
@@ -15,8 +16,11 @@ def setup_logging(script_name=None):
         # Clear existing handlers to avoid duplication
         logger.handlers.clear()
 
+    # Determine log file path from config, with a fallback
+    log_file = config.general['log_filename'] if config else 'process.log'
+
     # --- File Handler ---
-    file_handler = logging.FileHandler('process.log', mode='a', encoding='utf-8')
+    file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
     file_handler.setLevel(logging.INFO)
     # Add script name to the formatter
     file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
