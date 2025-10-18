@@ -1,5 +1,6 @@
 # ebooksort.py
 import os
+import sys
 import shutil
 import google.generativeai as genai
 import re
@@ -12,24 +13,29 @@ from collections import defaultdict
 import requests
 from ddgs import DDGS
 from logging_config import get_logger, close_logger
+from config_manager import config
 
 # Initialize logger
 logger = get_logger(__file__)
+
+# Exit if the configuration failed to load
+if not config:
+    logger.error("Configuration could not be loaded. Please check for a valid config.ini file.")
+    sys.exit(1)
 
 # Configure the Gemini API using an environment variable
 try:
     GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
     genai.configure(api_key=GOOGLE_API_KEY)
-    model = genai.GenerativeModel('gemini-2.5-flash')
+    model = genai.GenerativeModel(config.gemini['model_name'])
     logger.info("Gemini API configured successfully.")
 except KeyError:
     logger.error("The GOOGLE_API_KEY environment variable is not set.")
-    exit()
+    sys.exit(1)
 
-# Supported audio extensions
-AUDIO_EXTENSIONS = ('.mp3', '.m4a', '.wav', '.flac', '.m4b')
-
-def add_author_to_known_list(author_name, filepath="known_authors.txt", dry_run=False):
+def add_author_to_known_list(author_name, filepath=None, dry_run=False):
+    if filepath is None:
+        filepath = config.general['authors_filename']
     if not author_name or author_name == "Unknown":
         return
     author_to_add = author_name.strip().title()
@@ -53,7 +59,8 @@ def get_book_info_from_gemini(info_string, dry_run=False):
     if dry_run:
         logger.info(f"DRY RUN: Would call Gemini API for info string: '{info_string}'")
         return {"title": f"Title for {info_string}", "author": "Mock Author", "genre": "Mock Genre", "series": "Mock Series", "year": "2023", "synopsis": "This is a mock synopsis from a dry run."}
-    prompt = f'''Analyze the following name: '{info_string}'. Extract: Book Title, Book Author, Series (if applicable), Publication Year, Genre, and a brief Synopsis. Format the response as 'Title: <title> / Author: <author> / Genre: <genre> / Series: <series> / Year: <year> / Synopsis: <synopsis>'. If a field cannot be determined, use "Unknown", except for the Title. Provide synopsis in both Spanish and English.'''
+    
+    prompt = config.gemini['prompt'].format(info_string=info_string)
     try:
         response = model.generate_content(prompt)
         result = response.text.strip()
@@ -76,7 +83,7 @@ def get_book_info_from_gemini(info_string, dry_run=False):
         logger.error(f"Error contacting Gemini: {e}")
         return None
     finally:
-        time.sleep(4)
+        time.sleep(config.gemini['api_cooldown'])
 
 def sanitize_filename(name):
     clean_name = re.sub(r'[\\/*?<>|":]', "", name)
@@ -106,7 +113,7 @@ def extract_cover_art(file_path, title_dir, dry_run=False):
         return False
 
 def handle_existing_cover_file(source_folder, destination_folder, dry_run=False):
-    supported_images = ('.jpg', '.jpeg', '.png')
+    supported_images = config.general['image_extensions']
     for file in os.listdir(source_folder):
         if file.lower().endswith(supported_images):
             source_image_path = os.path.join(source_folder, file)
@@ -142,7 +149,8 @@ def find_unique_foldername(path):
 
 def pre_organize_into_folders(source_dir, staging_dir, dry_run=False):
     if not dry_run: os.makedirs(staging_dir, exist_ok=True)
-    supported_images = ('.jpg', '.jpeg', '.png')
+    supported_images = config.general['image_extensions']
+    audio_extensions = config.general['audio_extensions']
     base_name_map = defaultdict(list)
     logger.info("Scanning and grouping source directory...")
     for item in os.listdir(source_dir):
@@ -152,12 +160,12 @@ def pre_organize_into_folders(source_dir, staging_dir, dry_run=False):
             if not dry_run: shutil.move(source_path, os.path.join(staging_dir, item))
             logger.info(f"{ 'DRY RUN: Would move' if dry_run else 'Moving'} existing folder '{item}' to staging area.")
             continue
-        if item.lower().endswith(AUDIO_EXTENSIONS) or item.lower().endswith(supported_images):
+        if item.lower().endswith(audio_extensions) or item.lower().endswith(supported_images):
             base_name = get_base_name(item)
             if base_name: base_name_map[base_name].append(item)
     logger.info(f"Found {len(base_name_map)} potential groups among loose files.")
     for base_name, file_list in base_name_map.items():
-        if not any(f.lower().endswith(AUDIO_EXTENSIONS) for f in file_list): continue
+        if not any(f.lower().endswith(audio_extensions) for f in file_list): continue
         folder_name = sanitize_filename(base_name.title())
         dest_folder = os.path.join(staging_dir, folder_name)
         if not dry_run: os.makedirs(dest_folder, exist_ok=True)
@@ -193,6 +201,7 @@ def download_cover_from_internet(book_data, title_dir, dry_run=False):
 
 def organize_audio_files(base_dir, dest_dir, dry_run=False):
     unclassified_dir = os.path.join(dest_dir, "unclassified")
+    audio_extensions = config.general['audio_extensions']
     if not dry_run:
         os.makedirs(dest_dir, exist_ok=True)
         os.makedirs(unclassified_dir, exist_ok=True)
@@ -204,7 +213,7 @@ def organize_audio_files(base_dir, dest_dir, dry_run=False):
     for root, _, files in os.walk(base_dir):
         if os.path.abspath(root) == os.path.abspath(base_dir): continue
         try:
-            audio_files = [f for f in files if f.lower().endswith(AUDIO_EXTENSIONS)]
+            audio_files = [f for f in files if f.lower().endswith(audio_extensions)]
             if not audio_files: continue
             logger.info(f"\nProcessing group from folder: {os.path.basename(root)}")
             gemini_info_string = os.path.basename(root)
@@ -228,7 +237,7 @@ def organize_audio_files(base_dir, dest_dir, dry_run=False):
                 logger.info("Analyzing audio files for chapter generation...")
                 chapters = []
                 current_time_s = 0.0
-                sorted_audio_files_for_chapters = sorted([f for f in os.listdir(root) if f.lower().endswith(AUDIO_EXTENSIONS)])
+                sorted_audio_files_for_chapters = sorted([f for f in os.listdir(root) if f.lower().endswith(audio_extensions)])
                 for i, filename in enumerate(sorted_audio_files_for_chapters):
                     try:
                         audio_path = os.path.join(root, filename)
@@ -259,7 +268,7 @@ def organize_audio_files(base_dir, dest_dir, dry_run=False):
                 else: logger.info(f"DRY RUN: Would move group '{os.path.basename(root)}' to 'unclassified'.")
         except Exception as e: logger.error(f"--- ERROR processing folder: {os.path.basename(root)} ---\nAn unexpected error occurred: {e}\nThis folder will be skipped and will remain in the staging directory for manual review.")
         finally:
-            if not dry_run: time.sleep(2)
+            if not dry_run: time.sleep(config.gemini['api_cooldown'])
     return books_without_cover
 
 def main():

@@ -4,12 +4,15 @@ import argparse
 import sys
 import mutagen
 from logging_config import get_logger, close_logger
+from config_manager import config
 
 # Initialize logger
 logger = get_logger(__file__)
 
-# Supported audio extensions
-AUDIO_EXTENSIONS = ('.mp3', '.m4a', '.m4b', '.flac', '.wav')
+# Exit if the configuration failed to load
+if not config:
+    logger.error("Configuration could not be loaded. Please check for a valid config.ini file.")
+    sys.exit(1)
 
 def extract_cover(audio_path):
     """
@@ -69,11 +72,12 @@ def scan_and_extract(source_dir):
     """
     logger.info(f"Scanning directory: {source_dir}\n")
     
+    audio_extensions = config.general['audio_extensions']
     audio_files_found = []
     # Find all audio files recursively
     for root, _, files in os.walk(source_dir):
         for file in files:
-            if file.lower().endswith(AUDIO_EXTENSIONS):
+            if file.lower().endswith(audio_extensions):
                 audio_files_found.append(os.path.join(root, file))
 
     if not audio_files_found:

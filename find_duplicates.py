@@ -2,15 +2,19 @@
 import os
 import argparse
 import re
+import sys
 from collections import defaultdict
 from mutagen import File, MutagenError
 from logging_config import get_logger, close_logger
+from config_manager import config
 
 # Initialize logger
 logger = get_logger(__file__)
 
-# Supported audio extensions
-AUDIO_EXTENSIONS = ('.mp3', '.m4a', '.flac', '.wav', '.m4b', '.ogg', '.opus', '.aac')
+# Exit if the configuration failed to load
+if not config:
+    logger.error("Configuration could not be loaded. Please check for a valid config.ini file.")
+    sys.exit(1)
 
 def normalize_name_for_fs(filename):
     """
@@ -39,12 +43,13 @@ def find_duplicates_filesystem(directory):
     """
     logger.info(f"Starting filesystem scan in: {directory}")
     potential_duplicates = defaultdict(list)
+    audio_extensions = config.general['audio_extensions']
 
     for root, _, files in os.walk(directory):
         logger.info(f"Scanning folder: {root}")
         files_in_folder = defaultdict(list)
         for f in files:
-            if f.lower().endswith(AUDIO_EXTENSIONS):
+            if f.lower().endswith(audio_extensions):
                 normalized = normalize_name_for_fs(f)
                 if normalized: # Ensure we don't group empty names
                     files_in_folder[normalized].append(os.path.join(root, f))
@@ -98,11 +103,12 @@ def find_duplicates_metadata(directory):
     """
     logger.info(f"Starting metadata scan in: {directory} (this may take a while...)")
     potential_duplicates = defaultdict(list)
+    audio_extensions = config.general['audio_extensions']
 
     for root, _, files in os.walk(directory):
         logger.info(f"Scanning folder: {root}")
         tags_in_folder = defaultdict(list)
-        audio_files = [f for f in files if f.lower().endswith(AUDIO_EXTENSIONS)]
+        audio_files = [f for f in files if f.lower().endswith(audio_extensions)]
         
         for i, f in enumerate(audio_files):
             logger.info(f"  - Processing file {i+1}/{len(audio_files)}: {f}", end='\r')
@@ -127,9 +133,10 @@ def find_folders_with_multiple_audio(directory):
     """
     logger.info(f"Starting simple count scan in: {directory}")
     folders_with_multiple = {}
+    audio_extensions = config.general['audio_extensions']
 
     for root, _, files in os.walk(directory):
-        audio_files = [f for f in files if f.lower().endswith(AUDIO_EXTENSIONS)]
+        audio_files = [f for f in files if f.lower().endswith(audio_extensions)]
         if len(audio_files) > 1:
             logger.info(f"Found {len(audio_files)} audio files in: {root}")
             folders_with_multiple[root] = audio_files

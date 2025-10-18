@@ -7,9 +7,15 @@ import subprocess
 import shutil
 from mutagen import File
 from logging_config import get_logger, close_logger
+from config_manager import config
 
 # Initialize logger
 logger = get_logger(__file__)
+
+# Exit if the configuration failed to load
+if not config:
+    logger.error("Configuration could not be loaded. Please check for a valid config.ini file.")
+    sys.exit(1)
 
 def check_dependencies():
     """Checks if FFmpeg and ffprobe are installed and available in the system's PATH."""
@@ -60,7 +66,7 @@ def process_book_folder(book_path, dry_run=False):
         return
 
     # --- 3. Find and Sort Audio Files ---
-    audio_extensions = ('.mp3', '.m4a', '.wav', '.flac', '.m4b')
+    audio_extensions = config.general['audio_extensions']
     audio_files = [f for f in os.listdir(book_path) if f.lower().endswith(audio_extensions)]
     if not audio_files:
         logger.error("No audio files found in this folder.")
@@ -156,7 +162,7 @@ def process_book_folder(book_path, dry_run=False):
 
         command.extend([
             '-c:a', 'aac',
-            '-b:a', '128k',
+            '-b:a', config.m4b['audio_bitrate'],
             '-c:v', 'copy',
             output_path
         ])
