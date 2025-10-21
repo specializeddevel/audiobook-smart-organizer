@@ -143,40 +143,54 @@ python ebooksort.py "C:\Source" -d "D:\Organized Library"
 
 ### 3. `write_tags.py` - The Tagger
 
-This script reads the metadata (`metadata.json`) and cover art (`cover.jpg`) for each book in your organized library and writes that information into the audio files' tags. For better compatibility with different players, it writes the synopsis to both the **description and comment** fields.
+This script reads the metadata (`metadata.json`) and cover art (`cover.jpg`) for each book in your organized library and writes that information into the audio files' tags. It also includes a powerful bulk editing mode to correct metadata across multiple books at once.
 
 **Usage:**
 ```bash
 # Tag only new books (recommended)
 python write_tags.py "D:\Organized Library" --mode smart
 
+# Correct a misspelled author name across all their books
+python write_tags.py "D:\Organized Library\Artur C Klark\*" --mode edit --field author --from "Artur C Klark" --to "Arthur C. Clarke"
+
 # Find and fix missing covers across the entire library
 python write_tags.py "D:\Organized Library" --mode fix-covers
-
-# Fix empty comment tags by copying the description
-python write_tags.py "D:\Organized Library" --mode fix-comments
 ```
 
 **Arguments:**
 
 *   **`target_path`** (Positional, Required)
-    *   **Description**: Can be the path to the already organized audiobook library or the path to a single audio file you want to tag.
+    *   **Description**: The path to process. For most modes, this is a library directory or a single audio file. For `edit` mode, this is a **glob pattern** that selects the book folders to modify (e.g., `D:\Library\Author\*`).
     *   **Example (Directory)**: `D:\AudiobookLibrary`
     *   **Example (File)**: `D:\AudiobookLibrary\Author\Title\Chapter1.mp3`
+    *   **Example (Edit Pattern)**: `D:\AudiobookLibrary\Some Author\*`
 
 *   **`--mode`** (Optional)
-    *   **Description**: Controls the tagging behavior.
+    *   **Description**: Controls the script's behavior.
     *   **Default**: `smart`.
     *   **Options**:
-        *   `smart`: (Recommended) Only processes books that have not been tagged before. It looks for a marker file (`.tags_written`) to skip already processed folders.
-        *   `all`: Forcibly re-tags all books in the library, overwriting existing metadata and covers.
-        *   `tags-only`: Re-writes only the text metadata (title, author, etc.), but does not touch the cover art.
-        *   `cover-only`: Updates only the cover art in the audio files, leaving other metadata intact.
-        *   `fix-covers`: A special maintenance mode. It scans the library for books that do not have a `cover.jpg` file, tries to download it, and then embeds it into the corresponding audio files.
-        *   `fix-comments`: A maintenance mode that scans the library and, for any file with an empty comment tag, copies the content from the description/synopsis tag into it.
+        *   `smart`: (Recommended) Only processes books that have not been tagged before.
+        *   `all`: Forcibly re-tags all books, overwriting existing metadata and covers.
+        *   `tags-only`: Re-writes only the text metadata, leaving the cover art untouched.
+        *   `cover-only`: Updates only the cover art, leaving other metadata intact.
+        *   `fix-covers`: Scans for books missing a `cover.jpg`, downloads it, and embeds it.
+        *   `fix-comments`: Copies the description tag to the comment tag if the comment is empty.
+        *   `edit`: **(New)** A powerful bulk-editing mode. Requires `--field`, `--from`, and `--to`. It modifies the `metadata.json` and then automatically re-tags the audio files.
+
+*   **`--field`** (Edit Mode)
+    *   **Description**: The metadata field to edit (e.g., `author`, `genre`, `series`, `title`).
+    *   **Required for**: `--mode edit`.
+
+*   **`--from`** (Edit Mode)
+    *   **Description**: The existing (incorrect) value to search for within the specified field.
+    *   **Required for**: `--mode edit`.
+
+*   **`--to`** (Edit Mode)
+    *   **Description**: The new (correct) value to replace the old value with.
+    *   **Required for**: `--mode edit`.
 
 *   **`--dry-run`** (Optional, Flag)
-    *   **Description**: Performs a simulation of the tagging process. It prints the files that would be modified but does not save any changes to the audio files.
+    *   **Description**: Performs a simulation. It prints all actions and file modifications that would occur but does not actually save any changes. Essential for safely previewing `edit` mode changes.
 
 ### 4. `create_m4b.py` - The M4B Creator
 
