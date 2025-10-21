@@ -4,6 +4,7 @@ import argparse
 import sys
 import time
 import requests
+import glob
 from ddgs import DDGS
 from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, APIC, TPE1, TALB, TIT2, TCON, TDRC, TRCK, COMM
@@ -332,6 +333,62 @@ def process_single_file(file_path, mode, dry_run=False):
     logger.info(f"  - File is track {track_num}/{total_tracks}. Starting tagging process (mode: {mode})...")
     tag_audio_file(file_path, metadata, cover_image_data, track_num, total_tracks, mode, dry_run=dry_run)
 
+def edit_metadata_in_folder(book_path, field, from_value, to_value, dry_run=False):
+    logger.info(f"\nEditing metadata in: {os.path.basename(book_path)}")
+    json_path = os.path.join(book_path, "metadata.json")
+
+    if not os.path.exists(json_path):
+        logger.warning("  - metadata.json not found. Skipping.")
+        return
+
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
+    except Exception as e:
+        logger.error(f"  - Could not read metadata.json: {e}. Skipping.")
+        return
+
+    field_lower = field.lower()
+    changed = False
+
+    # Handle list fields like authors and genres
+    if field_lower in ['author', 'authors', 'genre', 'genres']:
+        key = 'authors' if field_lower in ['author', 'authors'] else 'genres'
+        if key in metadata and isinstance(metadata[key], list):
+            if from_value in metadata[key]:
+                metadata[key] = [to_value if v == from_value else v for v in metadata[key]]
+                changed = True
+    # Handle series (list of dicts)
+    elif field_lower == 'series':
+        if 'series' in metadata and isinstance(metadata['series'], list):
+            for series_item in metadata['series']:
+                if 'name' in series_item and series_item['name'] == from_value:
+                    series_item['name'] = to_value
+                    changed = True
+    # Handle simple string fields
+    elif field_lower in metadata and isinstance(metadata[field_lower], str):
+        if metadata[field_lower] == from_value:
+            metadata[field_lower] = to_value
+            changed = True
+
+    if changed:
+        logger.info(f"  - Field '{field}' matched. Value '{from_value}' will be changed to '{to_value}'.")
+        if not dry_run:
+            try:
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(metadata, f, ensure_ascii=False, indent=4)
+                logger.info("  - metadata.json updated successfully.")
+            except Exception as e:
+                logger.error(f"  - Failed to write updated metadata.json: {e}")
+                return # Don't proceed to tagging if metadata update failed
+
+        # Re-tag all audio files in the folder to apply the changes
+        logger.info("  - Re-tagging audio files to apply changes...")
+        # We call process_book_folder in 'all' mode to force re-tagging
+        process_book_folder(book_path, os.path.join(book_path, config.tagging['marker_filename']), 'all', dry_run)
+    else:
+        logger.info(f"  - No changes to apply for field '{field}' with value '{from_value}'.")
+
 def main():
     try:
         parser = argparse.ArgumentParser(
@@ -340,20 +397,28 @@ def main():
         )
         parser.add_argument(
             "target_path",
-            help="The path to the library directory OR a single audio file to process."
+            help="The path to the library directory OR a single audio file to process.\nFor edit mode, this is a glob pattern to select book folders (e.g., 'C:\\libros\\Autor\\*')."
         )
         parser.add_argument(
             "--mode",
-            choices=['smart', 'all', 'tags-only', 'cover-only', 'fix-covers', 'fix-comments'],
+            choices=['smart', 'all', 'tags-only', 'cover-only', 'fix-covers', 'fix-comments', 'edit'],
             default='smart',
             help="'smart': Process new books only (default).\n" \
                  "'all': Force re-tag of all metadata and covers for all books.\n" \
                  "'tags-only': Force re-tag of text metadata only.\n" \
                  "'cover-only': Force update of cover art only.\n" \
                  "'fix-covers': Find books missing a cover, download it, and embed it.\n" \
-                 "'fix-comments': Copy description to comment tag if comment is empty."
+                 "'fix-comments': Copy description to comment tag if comment is empty.\n" \
+                 "'edit': Edit a specific metadata field in bulk."
         )
         parser.add_argument("--dry-run", action="store_true", help="Perform a simulation without writing any tags or files.")
+        
+        # Add new arguments for edit mode
+        edit_group = parser.add_argument_group('Edit Mode Options')
+        edit_group.add_argument("--field", help="The metadata field to edit (e.g., author, genre, series). Required for --mode=edit.")
+        edit_group.add_argument("--from", dest="from_value", help="The old value to search for. Required for --mode=edit.")
+        edit_group.add_argument("--to", dest="to_value", help="The new value to replace the old value with. Required for --mode=edit.")
+        
         args = parser.parse_args()
 
         if args.dry_run:
@@ -361,6 +426,34 @@ def main():
             logger.info("No files will be modified.\n")
 
         target_path_abs = os.path.abspath(args.target_path)
+
+        if args.mode == 'edit':
+            if not all([args.field, args.from_value, args.to_value]):
+                logger.error("--field, --from, and --to are required when using --mode=edit.")
+                sys.exit(1)
+            
+            logger.info("--- Starting Audiobook Tagger (Edit Mode) ---")
+            logger.info(f"Searching for book folders matching glob pattern: {target_path_abs}")
+
+            matching_paths = glob.glob(target_path_abs)
+
+            book_folders_to_process = []
+            for path in matching_paths:
+                if os.path.isdir(path) and 'metadata.json' in os.listdir(path):
+                    book_folders_to_process.append(path)
+
+            if not book_folders_to_process:
+                logger.warning("No book folders found matching the specified pattern.")
+                logger.warning("Hint: If you are targeting a directory, add '\*' at the end of the path to match all items inside.")
+                return
+
+            logger.info(f"Found {len(book_folders_to_process)} book folder(s) to process.")
+
+            for book_path in book_folders_to_process:
+                edit_metadata_in_folder(book_path, args.field, args.from_value, args.to_value, args.dry_run)
+
+            logger.info("\n--- Edit Mode Finished ---")
+            return
 
         if not os.path.exists(target_path_abs):
             logger.error(f"The specified path '{target_path_abs}' does not exist.")
