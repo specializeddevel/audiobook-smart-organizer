@@ -3,6 +3,7 @@ import os
 import sys
 import shutil
 import google.generativeai as genai
+from PIL import Image
 import re
 import time
 import json
@@ -176,27 +177,122 @@ def pre_organize_into_folders(source_dir, staging_dir, dry_run=False):
                 if not dry_run: shutil.move(source_file_path, os.path.join(dest_folder, file))
                 logger.info(f"  - {'DRY RUN: Would move' if dry_run else 'Moved'} '{file}' to folder '{folder_name}'")
 
-def download_cover_from_internet(book_data, title_dir, dry_run=False):
+def analyze_cover(image_path):
+    """Analyzes a cover image for its dimensions and quality."""
+    min_resolution = config.covers['min_resolution']
+    if not os.path.exists(image_path):
+        return {"exists": False}
+    try:
+        with Image.open(image_path) as img:
+            width, height = img.size
+            is_square = (width == height)
+            is_low_quality = (width < min_resolution or height < min_resolution)
+            return {
+                "exists": True,
+                "is_square": is_square,
+                "is_low_quality": is_low_quality,
+                "dimensions": f"{width}x{height}"
+            }
+    except Exception as e:
+        logger.error(f"  - Could not analyze image {os.path.basename(image_path)}: {e}")
+        return {"exists": True, "error": str(e)}
+
+def download_cover_from_itunes(book_data, destination_path, dry_run=False):
+    """
+    Searches iTunes for a book cover and downloads it.
+    """
+    if dry_run:
+        logger.info(f"  - DRY RUN: Would search iTunes for cover for title: '{book_data.get('title')}'")
+        logger.info(f"  - DRY RUN: Would save cover to: {destination_path}")
+        return True
+    try:
+        title = book_data.get("title", "")
+        author = book_data.get("author", "")
+        if not title or title == "Unknown" or not author or author == "Unknown":
+            return False
+
+        search_term = f"{title} {author}"
+        logger.info(f"  - Searching for cover on iTunes with term: \"{search_term}\"")
+
+        params = {
+            "term": search_term,
+            "media": "ebook",
+            "entity": "ebook",
+            "limit": 1,
+            "country": "US"
+        }
+        response = requests.get("https://itunes.apple.com/search", params=params, timeout=15)
+        response.raise_for_status()
+        results = response.json()
+
+        if results["resultCount"] > 0:
+            artwork_url = results["results"][0].get("artworkUrl100")
+            if artwork_url:
+                high_res_url = artwork_url.replace("100x100bb.jpg", "1000x1000bb.jpg")
+                logger.info(f"    - Found artwork URL: {high_res_url}")
+
+                image_response = requests.get(high_res_url, stream=True, timeout=15)
+                image_response.raise_for_status()
+
+                with open(destination_path, 'wb') as f:
+                    for chunk in image_response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                logger.info(f"    - Successfully downloaded and saved cover to {os.path.basename(destination_path)} from iTunes.")
+                return True
+        
+        logger.info("    - No cover found on iTunes.")
+        return False
+    except Exception as e:
+        logger.error(f"    - Error searching or downloading cover from iTunes: {e}")
+        return False
+
+def download_cover_from_internet(book_data, destination_path, dry_run=False):
     if dry_run:
         logger.info(f"  - DRY RUN: Would search online for cover for title: '{book_data.get('title')}'")
-        return False
+        return True
     try:
         title = book_data.get("title", "")
         author = book_data.get("author", "")
         if not title or title == "Unknown" or not author or author == "Unknown": return False
+        
         keywords = f'{title} {author} book cover'
         logger.info(f"  - Searching for cover online with keywords: \"{keywords}\"")
+
+        logger.info("    - Prioritizing square images...")
         with DDGS() as ddgs:
-            results = list(ddgs.images(keywords, max_results=5))
-        if not results: return False
-        response = requests.get(results[0]["image"], stream=True, timeout=15)
+            square_results = list(ddgs.images(keywords, layout='Square', max_results=10))
+
+        for result in square_results:
+            if result.get('width') == result.get('height'):
+                logger.info(f"    - Found square image: {result['image']}")
+                try:
+                    response = requests.get(result["image"], stream=True, timeout=15)
+                    response.raise_for_status()
+                    with open(destination_path, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
+                    logger.info(f"    - Successfully downloaded and saved square cover to {os.path.basename(destination_path)}.")
+                    return True
+                except Exception as e:
+                    logger.warning(f"    - Failed to download square image candidate: {e}. Trying next...")
+        
+        logger.info("    - No suitable square image found. Performing general search...")
+        with DDGS() as ddgs:
+            general_results = list(ddgs.images(keywords, max_results=5))
+
+        if not general_results:
+            logger.info("    - General search returned no results.")
+            return False
+
+        response = requests.get(general_results[0]["image"], stream=True, timeout=15)
         response.raise_for_status()
-        with open(os.path.join(title_dir, "cover.jpg"), 'wb') as f:
+        with open(destination_path, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
-        logger.info("  - Successfully downloaded and saved cover.jpg.")
+        logger.info(f"    - Successfully downloaded and saved cover to {os.path.basename(destination_path)} from general search.")
         return True
+
     except Exception as e:
-        logger.error(f"Failed to download cover: {e}")
+        logger.error(f"  - An error occurred during cover download: {e}")
         return False
 
 def organize_audio_files(base_dir, dest_dir, dry_run=False):
@@ -246,8 +342,43 @@ def organize_audio_files(base_dir, dest_dir, dry_run=False):
 
                 logger.info("Searching for cover art...")
                 cover_art_found = handle_existing_cover_file(root, title_dir, dry_run=dry_run)
-                if not cover_art_found: cover_art_found = extract_cover_art(os.path.join(title_dir, audio_files[0]), title_dir, dry_run=dry_run)
-                if not cover_art_found: cover_art_found = download_cover_from_internet(book_data, title_dir, dry_run=dry_run)
+                if not cover_art_found:
+                    cover_art_found = extract_cover_art(os.path.join(title_dir, audio_files[0]), title_dir, dry_run=dry_run)
+                
+                if not cover_art_found:
+                    itunes_temp_path = os.path.join(title_dir, "itunes_cover.tmp")
+                    destination_path = os.path.join(title_dir, "cover.jpg")
+                    
+                    itunes_success = download_cover_from_itunes(book_data, itunes_temp_path, dry_run)
+                    
+                    if itunes_success:
+                        analysis = analyze_cover(itunes_temp_path)
+                        # A good cover is square and not low quality
+                        is_good_cover = analysis.get("is_square") and not analysis.get("is_low_quality")
+
+                        if dry_run or is_good_cover:
+                            logger.info(f"  - iTunes cover is good quality (or dry run). Using it. ({analysis.get('dimensions', 'N/A')})")
+                            if not dry_run: shutil.move(itunes_temp_path, destination_path)
+                            else: logger.info(f"  - DRY RUN: Would move iTunes temp cover to cover.jpg")
+                            cover_art_found = True
+                        else:
+                            logger.warning(f"  - iTunes cover is not ideal ({analysis.get('dimensions', 'N/A')}). Trying DDGS for a better one...")
+                            if download_cover_from_internet(book_data, destination_path, dry_run):
+                                logger.info("  - Found a better cover on DDGS. Using it instead.")
+                                cover_art_found = True
+                            else:
+                                logger.warning("  - No better cover found on DDGS. Falling back to original iTunes cover.")
+                                if not dry_run: shutil.move(itunes_temp_path, destination_path)
+                                else: logger.info(f"  - DRY RUN: Would move non-ideal iTunes temp cover to cover.jpg")
+                                cover_art_found = True
+                    else:
+                        logger.info("  - No cover from iTunes. Trying DDGS...")
+                        if download_cover_from_internet(book_data, destination_path, dry_run):
+                            cover_art_found = True
+
+                    # Cleanup temp file if it still exists
+                    if os.path.exists(itunes_temp_path):
+                        os.remove(itunes_temp_path)
 
                 # --- Create metadata.json ---
                 logger.info("Analyzing audio files for chapter generation...")

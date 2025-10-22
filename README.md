@@ -6,10 +6,12 @@ EbookSort is a suite of Python scripts designed to automatically organize, tag, 
 
 - **Automatic Organization**: Intelligently groups loose audio files into book folders, creating a clean `Author/Title` structure.
 - **AI-Powered Metadata**: Uses the Google Gemini API to fetch rich metadata (title, author, series, synopsis, genre, etc.) for your audiobooks.
-- **Multi-Source Cover Art**: Automatically finds the best available cover art through a 3-step process:
+- **Intelligent Cover Art Search**: Automatically finds the best available cover art. The script prioritizes high-resolution, square images by searching multiple sources:
     1.  Detects existing local image files.
     2.  Extracts cover art embedded in the audio files' metadata.
-    3.  Searches the internet for a high-quality cover if no local art is found.
+    3.  Searches the **iTunes Store** for a high-quality cover.
+    4.  If the iTunes cover isn't ideal (e.g., not square), it searches for a better alternative online.
+    5.  All downloaded covers are validated for quality based on configurable resolution settings.
 - **Advanced Tagging**: Embeds all metadata and cover art directly into each audio file (`.mp3`, `.m4a`, `.m4b`, `.flac`).
 - **Robust and Safe**: The process uses a staging area to prevent file loss if the script is interrupted. It's also fault-tolerant, skipping individual books that cause errors without stopping the entire process.
 - **Library Maintenance**: Includes tools to validate filenames, fix missing covers, and regenerate the library inventory.
@@ -35,7 +37,7 @@ Open a terminal in the project folder and run the following command to install t
 ```bash
 pip install -r requirements.txt
 ```
-*(This will install `google-generativeai`, `mutagen`, `requests`, `ddgs`, and other dependencies).*
+*(This will install `google-generativeai`, `mutagen`, `requests`, `ddgs`, `Pillow`, and other dependencies).*
 
 ### 2. Set Up Your API Key
 
@@ -72,6 +74,7 @@ Here are some of the key settings you can change:
 - **`[Validation]`**: Adjust the rules for the `validate_names.py` script, such as adding new "junk words" to ignore or changing word count thresholds for flagging names.
 - **`[Tagging]`**: Control how metadata is written, including the format for album and track titles.
 - **`[M4B]`**: Set the audio bitrate for `.m4b` files created by `create_m4b.py`.
+- **`[Covers]`**: Define the minimum quality standards for cover art.
 
 To make a change, simply open `config.ini` in a text editor, modify the value, and save the file. The scripts will use your new settings the next time they are run.
 
@@ -113,10 +116,7 @@ python validate_names.py "C:\Path\To\Your\Audiobooks"
 
 ### 2. `ebooksort.py` - The Organizer
 
-This is the main script. It takes a source directory, groups files, uses the Gemini AI to fetch metadata, finds a cover, and sorts everything into a clean library.
-
-**New in this version:**
-- At the end of the process, it will **display a list of books that were processed but for which no cover art could be found**.
+This is the main script. It takes a source directory, groups files, uses the Gemini AI to fetch metadata, finds the best possible cover art based on quality and dimensions, and sorts everything into a clean library.
 
 **Usage:**
 ```bash
@@ -173,7 +173,7 @@ python write_tags.py "D:\Organized Library" --mode fix-covers
         *   `all`: Forcibly re-tags all books, overwriting existing metadata and covers.
         *   `tags-only`: Re-writes only the text metadata, leaving the cover art untouched.
         *   `cover-only`: Updates only the cover art, leaving other metadata intact.
-        *   `fix-covers`: Scans for books missing a `cover.jpg`, downloads it, and embeds it.
+        *   `fix-covers`: Scans for books that are missing a `cover.jpg` or have a low-quality one (non-square or below `min_resolution` in `config.ini`). It then downloads a high-quality replacement and embeds it.
         *   `fix-comments`: Copies the description tag to the comment tag if the comment is empty.
         *   `edit`: **(New)** A powerful bulk-editing mode. Requires `--field`, `--from`, and `--to`. It modifies the `metadata.json` and then automatically re-tags the audio files.
 
@@ -192,7 +192,41 @@ python write_tags.py "D:\Organized Library" --mode fix-covers
 *   **`--dry-run`** (Optional, Flag)
     *   **Description**: Performs a simulation. It prints all actions and file modifications that would occur but does not actually save any changes. Essential for safely previewing `edit` mode changes.
 
-### 4. `create_m4b.py` - The M4B Creator
+### 4. `update_covers.py` - The Cover Quality Manager
+
+This powerful script scans your entire library to audit and upgrade your cover art based on quality rules you define in `config.ini`.
+
+**Why use it?** It's the best way to ensure all books in your library have high-resolution, square cover art, replacing any that are low-quality or have incorrect dimensions.
+
+**Usage:**
+```bash
+# Run in "smart" mode: only replaces covers that are missing, non-square, or low-resolution.
+python update_covers.py "D:\Organized Library"
+
+# Force replacement of ALL covers, regardless of current quality.
+python update_covers.py "D:\Organized Library" --force
+
+# Run in "audit" mode to generate an HTML report without changing any files.
+python update_covers.py "D:\Organized Library" --mode audit
+```
+
+**Arguments:**
+
+*   **`library_directory`** (Positional, Required)
+    *   **Description**: The path to the root directory of your organized audiobook library.
+    *   **Example**: `D:\AudiobookLibrary`
+
+*   **`--mode`** (Optional)
+    *   **Description**: Controls the script's execution mode.
+    *   **Default**: `smart`.
+    *   **Options**:
+        *   `smart`: (Recommended) The default mode. It intelligently replaces a cover only if the existing one is missing, not square, or below the `min_resolution` defined in `config.ini`.
+        *   `audit`: This mode does not change any files. Instead, it generates a `cover_audit.html` report in your library folder. This report details the quality of each existing cover and provides a preview link for the new cover the script would download, helping you decide whether to run the update.
+
+*   **`--force`** (Optional, Flag)
+    *   **Description**: Used with `smart` mode to force the replacement of **all** existing covers, ignoring their current quality.
+
+### 5. `create_m4b.py` - The M4B Creator
 
 Combines a folder of audio files (chapters) into a single `.m4b` audiobook file, complete with chapters, metadata, and cover art. **Requires FFmpeg to be installed** and accessible in the system's PATH.
 
@@ -211,7 +245,7 @@ python create_m4b.py "D:\Organized Library\Author Name\Book Title"
 *   **`--dry-run`** (Optional, Flag)
     *   **Description**: Displays the FFmpeg command that would be executed to create the `.m4b` file, but does not run it. Useful for debugging.
 
-### 5. `generate_inventory.py` - The Inventory Generator
+### 6. `generate_inventory.py` - The Inventory Generator
 
 This script regenerates the `inventory.csv` file from the metadata in your library. It's useful if you have manually moved or deleted books and want the inventory to reflect the current state.
 
@@ -226,7 +260,7 @@ python generate_inventory.py "D:\Organized Library"
     *   **Description**: The path to the root directory of your organized audiobook library.
     *   **Example**: `D:\AudiobookLibrary`
 
-### 6. `populate_authors.py` - The Author Populator
+### 7. `populate_authors.py` - The Author Populator
 
 Scans the library to find authors in the metadata and add them to your `known_authors.txt` list. This script was not previously documented in this section.
 
@@ -246,7 +280,7 @@ python populate_authors.py "D:\Organized Library"
     *   **Default**: `known_authors.txt` in the current directory.
     *   **Example**: `-f "master_authors.txt"`
 
-### 7. `extract_covers.py` - The Cover Extractor
+### 8. `extract_covers.py` - The Cover Extractor
 
 A simple utility that scans a directory, finds cover art embedded in audio files, and saves it as a `.jpg` file next to the original file.
 
@@ -261,7 +295,7 @@ python extract_covers.py "C:\Path\To\Your\Audiobooks"
     *   **Description**: The path to the directory (and subdirectories) containing the audio files from which you want to extract the cover art.
     *   **Example**: `C:\Audio\Temp`
 
-### 8. `find_duplicates.py` - The Duplicate Finder
+### 9. `find_duplicates.py` - The Duplicate Finder
 
 A powerful utility to scan your music library and find potential duplicate audio files. It offers multiple analysis modes, from a simple file count to a deep metadata scan.
 
@@ -301,6 +335,7 @@ python find_duplicates.py "C:\Path\To\Your\Music" --mode count
 - **`ddgs`**: A lightweight library to search for cover art on DuckDuckGo without requiring an additional API key.
 - **`requests`**: The standard library for making HTTP requests to download cover images.
 - **`google-generativeai`**: The official Google client library for interacting with the Gemini API.
+- **`Pillow`**: A powerful image processing library used for validating cover art dimensions and quality.
 
 ---
 

@@ -4,3 +4,4 @@ mutagen
 python-magic
 requests
 ddgs
+Pillow

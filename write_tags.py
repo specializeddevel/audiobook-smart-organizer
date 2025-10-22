@@ -3,7 +3,9 @@ import json
 import argparse
 import sys
 import time
+import shutil
 import requests
+from PIL import Image
 import glob
 from ddgs import DDGS
 from mutagen.mp3 import MP3
@@ -22,13 +24,85 @@ if not config:
     logger.error("Configuration could not be loaded. Please check for a valid config.ini file.")
     sys.exit(1)
 
-def download_cover_from_internet(book_data, title_dir, dry_run=False):
+def analyze_cover(image_path):
+    """Analyzes a cover image for its dimensions and quality."""
+    min_resolution = config.covers['min_resolution']
+    if not os.path.exists(image_path):
+        return {"exists": False}
+    try:
+        with Image.open(image_path) as img:
+            width, height = img.size
+            is_square = (width == height)
+            is_low_quality = (width < min_resolution or height < min_resolution)
+            return {
+                "exists": True,
+                "is_square": is_square,
+                "is_low_quality": is_low_quality,
+                "dimensions": f"{width}x{height}"
+            }
+    except Exception as e:
+        logger.error(f"  - Could not analyze image {os.path.basename(image_path)}: {e}")
+        return {"exists": True, "error": str(e)}
+
+def download_cover_from_itunes(book_data, destination_path, dry_run=False):
+    """
+    Searches iTunes for a book cover and downloads it.
+    """
+    if dry_run:
+        logger.info(f"  - DRY RUN: Would search iTunes for cover for title: '{book_data.get('title')}'")
+        logger.info(f"  - DRY RUN: Would save cover to: {destination_path}")
+        return True
+    try:
+        title = book_data.get("title", "")
+        authors = book_data.get("authors", [])
+        author = authors[0] if authors else ""
+
+        if not title or title == "Unknown" or not author or author == "Unknown":
+            return False
+
+        search_term = f"{title} {author}"
+        logger.info(f"  - Searching for cover on iTunes with term: \"{search_term}\"")
+
+        params = {
+            "term": search_term,
+            "media": "ebook",
+            "entity": "ebook",
+            "limit": 1,
+            "country": "US"
+        }
+        response = requests.get("https://itunes.apple.com/search", params=params, timeout=15)
+        response.raise_for_status()
+        results = response.json()
+
+        if results["resultCount"] > 0:
+            artwork_url = results["results"][0].get("artworkUrl100")
+            if artwork_url:
+                high_res_url = artwork_url.replace("100x100bb.jpg", "1000x1000bb.jpg")
+                logger.info(f"    - Found artwork URL: {high_res_url}")
+
+                image_response = requests.get(high_res_url, stream=True, timeout=15)
+                image_response.raise_for_status()
+
+                with open(destination_path, 'wb') as f:
+                    for chunk in image_response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                
+                logger.info(f"    - Successfully downloaded and saved cover to {os.path.basename(destination_path)} from iTunes.")
+                return True
+        
+        logger.info("    - No cover found on iTunes.")
+        return False
+    except Exception as e:
+        logger.error(f"    - Error searching or downloading cover from iTunes: {e}")
+        return False
+
+def download_cover_from_internet(book_data, destination_path, dry_run=False):
     """
     Searches the internet for a book cover using DuckDuckGo and downloads the first result.
     """
     if dry_run:
         logger.info(f"  - DRY RUN: Would search online for cover for title: '{book_data.get('title')}'")
-        return False
+        return True
 
     try:
         title = book_data.get("title", "")
@@ -42,29 +116,43 @@ def download_cover_from_internet(book_data, title_dir, dry_run=False):
         keywords = f'{title} {author} book cover'
         logger.info(f"  - Searching for cover online with keywords: \"{keywords}\"")
 
+        # First, try to find a square image
+        logger.info("    - Prioritizing square images...")
         with DDGS() as ddgs:
-            results = list(ddgs.images(keywords, region='wt-wt', safesearch='moderate', size=None, color=None, type_image=None, layout=None, license_image=None, max_results=5))
+            square_results = list(ddgs.images(keywords, layout='Square', max_results=10))
 
-        if not results:
-            logger.info("  - Online search returned no image results.")
+        for result in square_results:
+            if result.get('width') == result.get('height'):
+                logger.info(f"    - Found square image: {result['image']}")
+                try:
+                    response = requests.get(result["image"], stream=True, timeout=15)
+                    response.raise_for_status()
+                    with open(destination_path, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
+                    logger.info(f"    - Successfully downloaded and saved square cover to {os.path.basename(destination_path)}.")
+                    return True
+                except Exception as e:
+                    logger.warning(f"    - Failed to download square image candidate: {e}. Trying next...")
+        
+        logger.info("    - No suitable square image found. Performing general search...")
+        # Fallback to general search if no square image is found
+        with DDGS() as ddgs:
+            general_results = list(ddgs.images(keywords, max_results=5))
+
+        if not general_results:
+            logger.info("    - General search returned no results.")
             return False
 
-        image_url = results[0].get("image")
-        logger.info(f"  - Found potential cover: {image_url}")
-
-        response = requests.get(image_url, stream=True, timeout=15)
+        # Try to download the first result from the general search
+        response = requests.get(general_results[0]["image"], stream=True, timeout=15)
         response.raise_for_status()
-
-        cover_path = os.path.join(title_dir, "cover.jpg")
-        with open(cover_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                f.write(chunk)
-        
-        logger.info("  - Successfully downloaded and saved cover.jpg.")
+        with open(destination_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192): f.write(chunk)
+        logger.info(f"    - Successfully downloaded and saved cover to {os.path.basename(destination_path)} from general search.")
         return True
 
     except Exception as e:
-        logger.error(f"  - ERROR: Failed to download cover: {e}")
+        logger.error(f"  - An error occurred during cover download: {e}")
         return False
 
 def sort_audio_files(files):
@@ -475,32 +563,60 @@ def main():
             logger.info(f"Mode: {args.mode}")
             
             if args.mode == 'fix-covers':
+                min_resolution = config.covers['min_resolution']
                 for root, dirs, files in os.walk(target_path_abs):
-                    metadata_filename = next((f for f in files if f.lower() == 'metadata.json'), None)
-                    if metadata_filename:
-                        logger.info(f"\nChecking book: {os.path.basename(root)}")
-                        json_path = os.path.join(root, metadata_filename)
-                        cover_path = os.path.join(root, "cover.jpg")
+                    if "metadata.json" in files:
+                        book_path = root
+                        logger.info(f"\nChecking book: {os.path.basename(book_path)}")
+                        json_path = os.path.join(book_path, "metadata.json")
+                        cover_path = os.path.join(book_path, "cover.jpg")
                         cover_was_newly_downloaded = False
-                        
+
                         try:
-                            if not os.path.exists(cover_path):
+                            analysis = analyze_cover(cover_path)
+                            should_replace = False
+                            if not analysis["exists"]:
                                 logger.info("  - No cover.jpg found. Attempting to download...")
-                                with open(json_path, 'r+', encoding='utf-8') as f:
-                                    metadata = json.load(f)
-                                    if download_cover_from_internet(metadata, root, dry_run=args.dry_run):
-                                        logger.info("  - Download successful.")
-                                        cover_was_newly_downloaded = True
-                                        # This key doesn't exist in new format, but is harmless
-                                        metadata['cover_art_found'] = True 
-                                        if not args.dry_run:
-                                            f.seek(0)
-                                            json.dump(metadata, f, ensure_ascii=False, indent=4)
-                                            f.truncate()
-                                    else:
-                                        logger.warning("  - Failed to download a new cover. Skipping.")
+                                should_replace = True
+                            elif analysis.get("error"):
+                                logger.warning(f"  - Error analyzing existing cover: {analysis['error']}. Attempting to replace.")
+                                should_replace = True
+                            elif not analysis["is_square"] or analysis["is_low_quality"]:
+                                logger.warning(f"  - Existing cover is not ideal (Square: {analysis['is_square']}, Low Quality: {analysis['is_low_quality']}). Attempting to replace.")
+                                should_replace = True
                             else:
-                                logger.info("  - Local cover.jpg already exists. No action needed.")
+                                logger.info("  - Existing cover is square and good quality. Skipping.")
+
+                            if should_replace:
+                                with open(json_path, 'r', encoding='utf-8') as f:
+                                    metadata = json.load(f)
+                                itunes_temp_path = os.path.join(root, "itunes_cover.tmp")
+                                destination_path = cover_path
+                                
+                                itunes_success = download_cover_from_itunes(metadata, itunes_temp_path, args.dry_run)
+                                
+                                downloaded = False
+                                if itunes_success:
+                                    new_analysis = analyze_cover(itunes_temp_path)
+                                    if args.dry_run or (new_analysis.get("is_square") and not new_analysis.get("is_low_quality")):
+                                        if not args.dry_run: shutil.move(itunes_temp_path, destination_path)
+                                        downloaded = True
+                                    else:
+                                        if download_cover_from_internet(metadata, destination_path, args.dry_run):
+                                            downloaded = True
+                                        else:
+                                            if not args.dry_run: shutil.move(itunes_temp_path, destination_path)
+                                            downloaded = True
+                                else:
+                                    if download_cover_from_internet(metadata, destination_path, args.dry_run):
+                                        downloaded = True
+                                
+                                if os.path.exists(itunes_temp_path):
+                                    os.remove(itunes_temp_path)
+
+                                if downloaded:
+                                    logger.info("  - Download successful.")
+                                    cover_was_newly_downloaded = True
 
                             if cover_was_newly_downloaded:
                                 logger.info("  - Syncing newly downloaded cover art to audio file tags...")
@@ -509,17 +625,13 @@ def main():
                                 with open(cover_path, 'rb') as f:
                                     cover_image_data = f.read()
                                 
-                                audio_files = [f for f in os.listdir(root) if f.lower().endswith(audio_extensions)]
-                                if not audio_files:
-                                    logger.warning("  - No audio files found to tag.")
-                                    continue
-
+                                audio_files = [f for f in os.listdir(root) if f.lower().endswith(config.general['audio_extensions'])]
                                 sorted_audio_files = sort_audio_files(audio_files)
                                 total_tracks = len(sorted_audio_files)
 
                                 for i, filename in enumerate(sorted_audio_files):
                                     file_path = os.path.join(root, filename)
-                                    tag_audio_file(file_path, metadata, cover_image_data, i + 1, total_tracks, 'cover-only', dry_run=args.dry_run)
+                                    tag_audio_file(file_path, metadata, cover_image_data, i + 1, total_tracks, 'cover-only', args.dry_run)
                             
                         except Exception as e:
                             logger.error(f"  - An unexpected ERROR occurred while processing {os.path.basename(root)}: {e}")
@@ -527,7 +639,6 @@ def main():
                         finally:
                             if not args.dry_run:
                                 time.sleep(config.gemini['api_cooldown'])
-                            # Stop descending into this folder
                             dirs[:] = []
                 
                 logger.info("\n--- Fix Covers Finished ---")

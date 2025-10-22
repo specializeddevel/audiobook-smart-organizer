@@ -63,6 +63,12 @@ class ConfigManager:
             'csv_delimiter': self.config.get('Inventory', 'csv_delimiter'),
         }
 
+    @property
+    def covers(self):
+        return {
+            'min_resolution': self.config.getint('Covers', 'min_resolution'),
+        }
+
 # Create a single, importable instance of the config manager
 # This allows other scripts to just do `from config_manager import config`
 try:
