@@ -13,6 +13,10 @@ import datetime
 from collections import defaultdict
 import requests
 from ddgs import DDGS
+from mutagen.mp3 import MP3
+from mutagen.id3 import ID3, APIC, TPE1, TALB, TIT2, TCON, TDRC, TRCK, COMM
+from mutagen.mp4 import MP4, MP4Cover
+from mutagen.flac import FLAC, Picture
 from logging_config import get_logger, close_logger
 from config_manager import config
 
@@ -24,14 +28,17 @@ if not config:
     logger.error("Configuration could not be loaded. Please check for a valid config.ini file.")
     sys.exit(1)
 
-# Configure the Gemini API using an environment variable
+# Configure the Gemini API using the key from config.ini
 try:
-    GOOGLE_API_KEY = os.environ["GOOGLE_API_KEY"]
-    genai.configure(api_key=GOOGLE_API_KEY)
+    api_key = config.gemini['api_key']
+    if not api_key or api_key == "YOUR_API_KEY_HERE":
+        logger.error("Gemini API key is not set in config.ini. Please add it to the [Gemini] section.")
+        sys.exit(1)
+    genai.configure(api_key=api_key)
     model = genai.GenerativeModel(config.gemini['model_name'])
     logger.info("Gemini API configured successfully.")
-except KeyError:
-    logger.error("The GOOGLE_API_KEY environment variable is not set.")
+except (KeyError, AttributeError):
+    logger.error("Failed to configure Gemini API. Make sure the api_key is set in config.ini.")
     sys.exit(1)
 
 def add_author_to_known_list(author_name, filepath=None, dry_run=False):
@@ -295,7 +302,97 @@ def download_cover_from_internet(book_data, destination_path, dry_run=False):
         logger.error(f"  - An error occurred during cover download: {e}")
         return False
 
-def organize_audio_files(base_dir, dest_dir, dry_run=False):
+def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_tracks, dry_run=False):
+    """
+    Applies metadata tags to a single audio file.
+    """
+    try:
+        audio = mutagen.File(file_path, easy=False)
+        if audio is None:
+            raise ValueError("Could not load file.")
+
+        audio.delete()
+
+        title = metadata.get("title", "Unknown Title")
+        authors = metadata.get("authors", [])
+        author = authors[0] if authors else ""
+        genres = metadata.get("genres", [])
+        genre = genres[0] if genres else ""
+        series_list = metadata.get("series", [])
+        series_name = series_list[0].get("name") if series_list and isinstance(series_list[0], dict) else None
+        year = metadata.get("publishedYear")
+        synopsis = metadata.get("description", "")
+
+        album_title = title
+        if series_name:
+            album_title = config.tagging['album_title_format'].format(title=title, series_name=series_name)
+
+        track_title = album_title
+        if total_tracks > 1:
+            base_name = os.path.splitext(os.path.basename(file_path))[0]
+            if base_name.lower().startswith(("chapter", "capitulo", "part", "parte")):
+                 track_title = base_name.replace('_', ' ').title()
+            else:
+                 track_title = config.tagging['track_title_format'].format(track_num=track_num, base_name=base_name)
+
+        if isinstance(audio, MP3):
+            audio.tags = ID3()
+            audio.tags.add(TPE1(encoding=3, text=author))
+            audio.tags.add(TALB(encoding=3, text=album_title))
+            audio.tags.add(TIT2(encoding=3, text=track_title))
+            audio.tags.add(TCON(encoding=3, text=genre))
+            audio.tags.add(TRCK(encoding=3, text=f"{track_num}/{total_tracks}"))
+            if year: audio.tags.add(TDRC(encoding=3, text=str(year)))
+            if synopsis: 
+                audio.tags.add(COMM(encoding=3, lang='eng', desc='Synopsis', text=synopsis))
+                audio.tags.add(COMM(encoding=3, lang='eng', desc='', text=synopsis))
+            if cover_image_data:
+                audio.tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=cover_image_data))
+        
+        elif isinstance(audio, MP4):
+            audio.tags["\xa9ART"] = author
+            audio.tags["\xa9alb"] = album_title
+            audio.tags["\xa9nam"] = track_title
+            audio.tags["\xa9gen"] = genre
+            audio.tags["trkn"] = [(track_num, total_tracks)]
+            if year: audio.tags["\xa9day"] = str(year)
+            if synopsis: 
+                audio.tags["ldes"] = synopsis
+                audio.tags["\xa9cmt"] = synopsis
+            if cover_image_data:
+                audio.tags["covr"] = [MP4Cover(cover_image_data, imageformat=MP4Cover.FORMAT_JPEG)]
+
+        elif isinstance(audio, mutagen.flac.FLAC):
+            audio["ARTIST"] = author
+            audio["ALBUM"] = album_title
+            audio["TITLE"] = track_title
+            audio["GENRE"] = genre
+            audio["TRACKNUMBER"] = str(track_num)
+            audio["TRACKTOTAL"] = str(total_tracks)
+            if year: audio["DATE"] = str(year)
+            if synopsis: 
+                audio["DESCRIPTION"] = synopsis
+                audio["COMMENT"] = synopsis
+            if cover_image_data:
+                pic = Picture()
+                pic.type = 3
+                pic.mime = "image/jpeg"
+                pic.desc = "Cover"
+                pic.data = cover_image_data
+                audio.add_picture(pic)
+        else:
+            logger.warning(f"      - Unsupported file type for tagging: {type(audio)}. Skipping.")
+            return
+
+        if not dry_run:
+            audio.save()
+        
+        logger.info(f"      - {'DRY RUN: Would tag' if dry_run else 'Successfully tagged'}: {os.path.basename(file_path)}")
+
+    except Exception as e:
+        logger.error(f"      - ERROR: Failed to tag {os.path.basename(file_path)}: {e}")
+
+def organize_audio_files(base_dir, dest_dir, dry_run=False, no_tagging=False):
     unclassified_dir = os.path.join(dest_dir, "unclassified")
     no_cover_dir = os.path.join(dest_dir, config.general['no_cover_folder'])
     audio_extensions = config.general['audio_extensions']
@@ -409,6 +506,24 @@ def organize_audio_files(base_dir, dest_dir, dry_run=False):
                 else: 
                     logger.info(f"DRY RUN: Would save metadata.json to: {title_dir}")
 
+                # --- Write Tags ---
+                if not no_tagging:
+                    logger.info("Writing metadata tags to audio files...")
+                    cover_image_data = None
+                    if cover_art_found and not dry_run:
+                        try:
+                            with open(os.path.join(title_dir, "cover.jpg"), 'rb') as f:
+                                cover_image_data = f.read()
+                        except Exception as e:
+                            logger.warning(f"Could not read cover image for tagging: {e}")
+
+                    # The audio files are already in title_dir
+                    sorted_audio_files = sorted([f for f in os.listdir(title_dir) if f.lower().endswith(audio_extensions)])
+                    total_tracks = len(sorted_audio_files)
+                    for i, filename in enumerate(sorted_audio_files):
+                        file_path = os.path.join(title_dir, filename)
+                        tag_audio_file(file_path, audiobookshelf_data, cover_image_data, i + 1, total_tracks, dry_run)
+
                 # --- Final Placement --- 
                 if cover_art_found:
                     logger.info("Cover art processing complete. Book is fully organized.")
@@ -442,6 +557,7 @@ def main():
     parser.add_argument("source_directory", help="The directory containing the audiobooks to organize.")
     parser.add_argument("-d", "--destination_directory", default=None, help="The directory where organized audiobooks will be saved. Defaults to the source directory (in-place sort).")
     parser.add_argument("--dry-run", action="store_true", help="Perform a simulation without moving files or calling APIs.")
+    parser.add_argument("--no-tagging", action="store_true", help="Disable writing metadata tags to audio files.")
     args = parser.parse_args()
     source_dir_abs = os.path.abspath(args.source_directory)
     if args.destination_directory: dest_dir_abs = os.path.abspath(args.destination_directory)
@@ -457,7 +573,7 @@ def main():
         logger.info("\n--- Phase 1: Grouping files into staging area ---")
         pre_organize_into_folders(source_dir_abs, staging_dir, dry_run=args.dry_run)
         logger.info("\n--- Phase 2: Classifying and organizing folders ---")
-        books_without_cover = organize_audio_files(staging_dir, dest_dir_abs, dry_run=args.dry_run)
+        books_without_cover = organize_audio_files(staging_dir, dest_dir_abs, dry_run=args.dry_run, no_tagging=args.no_tagging)
         logger.info(f"\nProcess finished. Checking for unprocessed items in staging area...")
         if args.dry_run and not os.path.exists(staging_dir): remaining_items = []
         else: remaining_items = os.listdir(staging_dir)

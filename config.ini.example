@@ -18,7 +18,7 @@ no_cover_folder = _needs_cover
 
 [Gemini]
 # Your Google Gemini API key. It is recommended to keep this out of version control.
-api_key = AIzaSyBLoHC1c0sWXrC4XJ8IH8ZFqoxU2yRR_yQ
+api_key = YOUR_API_KEY_HERE
 
 # The Google Gemini model to use foel r metadata analysis.
 # The Google Gemini model to use foel r metadata analysis.

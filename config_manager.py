@@ -28,6 +28,7 @@ class ConfigManager:
     @property
     def gemini(self):
         return {
+            'api_key': self.config.get('Gemini', 'api_key'),
             'model_name': self.config.get('Gemini', 'model_name'),
             'prompt': self.config.get('Gemini', 'prompt'),
             'api_cooldown': self.config.getint('Gemini', 'api_cooldown'),

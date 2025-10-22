@@ -19,4 +19,4 @@ ebooks/inventory.csv
 known_authors.txt
 
 # Log files
-process.log
+process.log"config.ini" 
