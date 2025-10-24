@@ -93,6 +93,37 @@ def get_book_info_from_gemini(info_string, dry_run=False):
     finally:
         time.sleep(config.gemini['api_cooldown'])
 
+def get_book_info_from_google_books(info_string, dry_run=False):
+    if dry_run:
+        logger.info(f"DRY RUN: Would search Google Books for: '{info_string}'")
+        return None
+    try:
+        search_url = f"https://www.googleapis.com/books/v1/volumes?q={info_string}"
+        response = requests.get(search_url)
+        response.raise_for_status()
+        data = response.json()
+        if "items" not in data or not data["items"]:
+            logger.info("No results found on Google Books.")
+            return None
+        
+        book_info = data["items"][0]["volumeInfo"]
+        title = book_info.get("title", "Unknown")
+        authors = book_info.get("authors", ["Unknown"])
+        author = authors[0]
+        synopsis = book_info.get("description", "Unknown")
+        published_date = book_info.get("publishedDate", "Unknown")
+        year = published_date.split('-')[0] if published_date != "Unknown" else "Unknown"
+        categories = book_info.get("categories", ["Unknown"])
+        genre = categories[0]
+        
+        logger.info(f"Found on Google Books: Title: {title}, Author: {author}")
+        return {"title": title, "author": author, "synopsis": synopsis, "genre": genre, "series": "Unknown", "year": year}
+
+    except Exception as e:
+        logger.error(f"Error searching Google Books: {e}")
+        return None
+
+
 def sanitize_filename(name):
     clean_name = re.sub(r'[\\/*?<>|":]', "", name)
     clean_name = clean_name.strip()
@@ -156,7 +187,44 @@ def find_unique_foldername(path):
         counter += 1
 
 def pre_organize_into_folders(source_dir, staging_dir, dry_run=False):
-    if not dry_run: os.makedirs(staging_dir, exist_ok=True)
+    if not dry_run:
+        os.makedirs(staging_dir, exist_ok=True)
+
+    logger.info("Standardizing filenames by replacing '_' and '-' with spaces...")
+    # We need to list items before iterating to avoid issues with renaming
+    items_to_process = os.listdir(source_dir)
+    for item in items_to_process:
+        source_path = os.path.join(source_dir, item)
+        
+        # Check if the path still exists, as it might have been renamed if it was part of a directory that got renamed
+        if not os.path.exists(source_path):
+            continue
+
+        # Don't touch the staging directory if it's inside the source
+        if os.path.abspath(source_path) == os.path.abspath(staging_dir):
+            continue
+
+        # Standardize name by replacing separators and collapsing spaces
+        new_item_name = item.replace('_', ' ').replace('-', ' ')
+        new_item_name = re.sub(r'\s+', ' ', new_item_name).strip()
+
+        if new_item_name != item:
+            new_path = os.path.join(source_dir, new_item_name)
+            
+            if os.path.exists(new_path):
+                logger.warning(f"  - Cannot rename '{item}' to '{new_item_name}' because the destination already exists. Skipping.")
+                continue
+            
+            if not dry_run:
+                try:
+                    os.rename(source_path, new_path)
+                    logger.info(f"  - Renamed '{item}' to '{new_item_name}'")
+                except OSError as e:
+                    logger.error(f"  - Error renaming '{item}' to '{new_item_name}': {e}")
+            else:
+                logger.info(f"  - DRY RUN: Would rename '{item}' to '{new_item_name}'")
+    logger.info("Filename standardization complete.")
+
     supported_images = config.general['image_extensions']
     audio_extensions = config.general['audio_extensions']
     base_name_map = defaultdict(list)
@@ -392,7 +460,7 @@ def tag_audio_file(file_path, metadata, cover_image_data, track_num, total_track
     except Exception as e:
         logger.error(f"      - ERROR: Failed to tag {os.path.basename(file_path)}: {e}")
 
-def organize_audio_files(base_dir, dest_dir, dry_run=False, no_tagging=False):
+def organize_audio_files(base_dir, dest_dir, dry_run=False, no_tagging=False, force_gemini=False):
     unclassified_dir = os.path.join(dest_dir, "unclassified")
     no_cover_dir = os.path.join(dest_dir, config.general['no_cover_folder'])
     audio_extensions = config.general['audio_extensions']
@@ -416,9 +484,23 @@ def organize_audio_files(base_dir, dest_dir, dry_run=False, no_tagging=False):
             if not audio_files: continue
 
             logger.info(f"\nProcessing group from folder: {os.path.basename(root)}")
-            gemini_info_string = os.path.basename(root)
-            logger.info(f"Using '{gemini_info_string}' to get book information...")
-            book_data = get_book_info_from_gemini(gemini_info_string, dry_run=dry_run)
+            info_string = os.path.basename(root)
+            
+            book_data = None
+            if not force_gemini:
+                # First, try to get info from Google Books
+                logger.info(f"Searching Google Books for '{info_string}'...")
+                book_data = get_book_info_from_google_books(info_string, dry_run=dry_run)
+
+            # If not found on Google Books, or if the result is incomplete, or if Gemini is forced, try Gemini
+            if force_gemini or not book_data or book_data["title"] == "Unknown":
+                if force_gemini:
+                    logger.info("Forcing Gemini lookup as per user request.")
+                else:
+                    logger.info("Not found on Google Books or result was incomplete. Falling back to Gemini.")
+                
+                logger.info(f"Using '{info_string}' to get book information from Gemini...")
+                book_data = get_book_info_from_gemini(info_string, dry_run=dry_run)
 
             if book_data and book_data["title"] != "Unknown":
                 author_folder_name = sanitize_filename(book_data["author"].title())
@@ -558,6 +640,7 @@ def main():
     parser.add_argument("-d", "--destination_directory", default=None, help="The directory where organized audiobooks will be saved. Defaults to the source directory (in-place sort).")
     parser.add_argument("--dry-run", action="store_true", help="Perform a simulation without moving files or calling APIs.")
     parser.add_argument("--no-tagging", action="store_true", help="Disable writing metadata tags to audio files.")
+    parser.add_argument("--force-gemini", action="store_true", help="Force the use of Gemini for fetching book data, skipping other sources.")
     args = parser.parse_args()
     source_dir_abs = os.path.abspath(args.source_directory)
     if args.destination_directory: dest_dir_abs = os.path.abspath(args.destination_directory)
@@ -573,7 +656,7 @@ def main():
         logger.info("\n--- Phase 1: Grouping files into staging area ---")
         pre_organize_into_folders(source_dir_abs, staging_dir, dry_run=args.dry_run)
         logger.info("\n--- Phase 2: Classifying and organizing folders ---")
-        books_without_cover = organize_audio_files(staging_dir, dest_dir_abs, dry_run=args.dry_run, no_tagging=args.no_tagging)
+        books_without_cover = organize_audio_files(staging_dir, dest_dir_abs, dry_run=args.dry_run, no_tagging=args.no_tagging, force_gemini=args.force_gemini)
         logger.info(f"\nProcess finished. Checking for unprocessed items in staging area...")
         if args.dry_run and not os.path.exists(staging_dir): remaining_items = []
         else: remaining_items = os.listdir(staging_dir)

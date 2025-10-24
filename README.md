@@ -5,7 +5,7 @@ EbookSort is a suite of Python scripts designed to automatically organize, tag, 
 ## Key Features
 
 - **Automatic Organization**: Intelligently groups loose audio files into book folders, creating a clean `Author/Title` structure.
-- **AI-Powered Metadata**: Uses the Google Gemini API to fetch rich metadata (title, author, series, synopsis, genre, etc.) for your audiobooks.
+- **Multi-Source Metadata**: Fetches rich metadata (title, author, series, synopsis, genre, etc.) for your audiobooks by querying Google Books and using the Google Gemini API for more complex cases.
 - **Intelligent Cover Art Search**: Automatically finds the best available cover art. The script prioritizes high-resolution, square images by searching multiple sources:
     1.  Detects existing local image files.
     2.  Extracts cover art embedded in the audio files' metadata.
@@ -82,161 +82,90 @@ To make a change, simply open `config.ini` in a text editor, modify the value, a
 
 ## Recommended Workflow
 
+The main script for this suite is `ebooksort.py`. It is designed to be an all-in-one tool that handles the entire organization and tagging process from start to finish. For most use cases, this is the only script you will need to run.
 
+1.  **Organize and Tag**: Simply run `ebooksort.py` on your folder of unorganized audiobooks. It will handle everything: grouping files, fetching metadata from Google Books and Gemini, downloading a high-quality cover, and writing all the tags to the audio files.
 
-The process has been streamlined into a single step:
+    ```bash
+    python ebooksort.py "C:\Path\To\Your\Audiobooks"
+    ```
 
-
-
-1.  **Organize and Tag**: Simply run `ebooksort.py` on your folder of unorganized audiobooks. It will handle everything: grouping files, fetching metadata, downloading a high-quality cover, and writing all the tags to the audio files.
-
-
-
-```bash
-
-python ebooksort.py "C:\Path\To\Your\Audiobooks"
-
-```
-
-
-
-For users who prefer the old two-step process, you can use the `--no-tagging` flag to prevent `ebooksort.py` from writing tags, and then run `write_tags.py` separately.
-
-
+The other scripts included in this project are powerful tools for maintenance, bulk editing, and other specific tasks. While not needed for the primary workflow, they are available for users who need more granular control over their library.
 
 ---
 
-
-
 ## Scripts and Usage
-
-
 
 Here is a detailed breakdown of each script and its available command-line arguments.
 
+### 1. `ebooksort.py` - The All-in-One Organizer
 
+This is the main script. It takes a source directory, groups files, fetches metadata, finds the best possible cover art, and sorts everything into a clean library, writing all metadata tags to the files in the process. By default, it first queries Google Books for metadata and then falls back to the Gemini AI if needed.
 
-### 1. `validate_names.py` - The Validator
+**Usage:**
 
+```bash
+# Organize and tag in the same directory
+python ebooksort.py "C:\Path\To\Your\Audiobooks"
 
+# Organize to a different destination, skipping the tagging step
+python ebooksort.py "C:\Source" -d "D:\Organized Library" --no-tagging
+
+# Organize and force Gemini to be the only metadata source
+python ebooksort.py "C:\Path\To\Your\Audiobooks" --force-gemini
+```
+
+**Arguments:**
+
+*   **`source_directory`** (Positional, Required)
+    *   **Description**: The path to the directory containing the unorganized audiobooks (loose files or folders).
+    *   **Example**: `C:\MyAudiobooks\New`
+
+*   **`-d` / `--destination_directory`** (Optional)
+    *   **Description**: Specifies the path to the final organized library. If not provided, the script will perform the organization "in-place," meaning the `source_directory` will become the organized library.
+    *   **Default**: The same as `source_directory`.
+    *   **Example**: `-d "D:\AudiobookLibrary"`
+
+*   **`--dry-run`** (Optional, Flag)
+    *   **Description**: Performs a simulation of the process. It prints all the actions that would be taken but does not execute any real action. Ideal for safely previewing changes.
+
+*   **`--no-tagging`** (Optional, Flag)
+    *   **Description**: Disables the automatic writing of metadata tags to the audio files. Use this if you prefer to run `write_tags.py` separately.
+
+*   **`--force-gemini`** (Optional, Flag)
+    *   **Description**: Forces the script to use only the Google Gemini API for fetching book metadata, skipping the initial check against Google Books.
+
+### 2. `validate_names.py` - The Validator
 
 This script is a diagnostic tool. It analyzes the names of folders and audio files in a directory to identify those that likely do not contain enough information (title and author) to be classified correctly.
 
-
-
 **Why use it?** It helps you fix names *before* starting the main process, saving time and preventing books from ending up in the "unclassified" folder.
 
-
-
 **Usage:**
 
 ```bash
-
 python validate_names.py "C:\Path\To\Your\Audiobooks"
-
 ```
-
-
 
 **Arguments:**
 
-
-
 *   **`source_directory`** (Positional, Required)
-
     *   **Description**: The path to the directory you want to analyze for problematic names.
-
     *   **Example**: `C:\MyAudiobooks\ToCheck`
 
-
-
 *   **`--authors-file`** (Optional)
-
     *   **Description**: The path to the text file containing the list of known authors. Using this list helps the script more accurately identify if a filename contains an author.
-
     *   **Default**: `known_authors.txt` in the current directory.
-
     *   **Example**: `--authors-file "C:\Config\authors.txt"`
-
-
-
-### 2. `ebooksort.py` - The All-in-One Organizer
-
-
-
-This is the main script. It takes a source directory, groups files, uses the Gemini AI to fetch metadata, finds the best possible cover art based on quality and dimensions, and sorts everything into a clean library, writing all metadata tags to the files in the process.
-
-
-
-**Usage:**
-
-```bash
-
-# Organize and tag in the same directory
-
-python ebooksort.py "C:\Path\To\Your\Audiobooks"
-
-
-
-# Organize from a source to a different destination, without writing tags
-
-python ebooksort.py "C:\Source" -d "D:\Organized Library" --no-tagging
-
-```
-
-
-
-**Arguments:**
-
-
-
-*   **`source_directory`** (Positional, Required)
-
-    *   **Description**: The path to the directory containing the unorganized audiobooks (loose files or folders).
-
-    *   **Example**: `C:\MyAudiobooks\New`
-
-
-
-*   **`-d` / `--destination_directory`** (Optional)
-
-    *   **Description**: Specifies the path to the final organized library. If not provided, the script will perform the organization "in-place," meaning the `source_directory` will become the organized library.
-
-    *   **Default**: The same as `source_directory`.
-
-    *   **Example**: `-d "D:\AudiobookLibrary"`
-
-
-
-*   **`--dry-run`** (Optional, Flag)
-
-    *   **Description**: Performs a simulation of the process. It prints all the actions that would be taken (moving files, calling APIs, writing metadata) but does not execute any real action. Ideal for safely previewing changes.
-
-
-
-*   **`--no-tagging`** (Optional, Flag)
-
-    *   **Description**: Disables the automatic writing of metadata tags to the audio files. Use this if you prefer to run `write_tags.py` separately.
-
-
 
 ### 3. `write_tags.py` - The Library Maintenance Tool
 
-
-
-While `ebooksort.py` now handles the initial tagging, `write_tags.py` remains a powerful tool for library maintenance and bulk editing.
-
-
+While `ebooksort.py` handles the initial tagging, `write_tags.py` remains a powerful tool for library maintenance and bulk editing.
 
 **Why use it?**
-
 - To fix covers for multiple books at once if they are missing or low-quality (`--mode fix-covers`).
-
 - To perform bulk edits on metadata, such as correcting a misspelled author name across all their books (`--mode edit`).
-
 - To re-tag a library if you have made manual changes to the `metadata.json` files.
-
-
 
 **Usage:**
 ```bash
@@ -268,7 +197,7 @@ python write_tags.py "D:\Organized Library" --mode fix-covers
         *   `cover-only`: Updates only the cover art, leaving other metadata intact.
         *   `fix-covers`: Scans for books that are missing a `cover.jpg` or have a low-quality one (non-square or below `min_resolution` in `config.ini`). It then downloads a high-quality replacement and embeds it.
         *   `fix-comments`: Copies the description tag to the comment tag if the comment is empty.
-        *   `edit`: **(New)** A powerful bulk-editing mode. Requires `--field`, `--from`, and `--to`. It modifies the `metadata.json` and then automatically re-tags the audio files.
+        *   `edit`: A powerful bulk-editing mode. Requires `--field`, `--from`, and `--to`. It modifies the `metadata.json` and then automatically re-tags the audio files.
 
 *   **`--field`** (Edit Mode)
     *   **Description**: The metadata field to edit (e.g., `author`, `genre`, `series`, `title`).
