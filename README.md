@@ -360,6 +360,16 @@ python find_duplicates.py "C:\Path\To\Your\Music" --mode count
 - **`Pillow`**: A powerful image processing library used for validating cover art dimensions and quality.
 
 ---
+Please give me a star⭐
+==========================================
+
+If you like this project,Thanks ❤  
+
+
+Communication with the developer📭
+===========================================
+
+Any suggestions, criticisms, comments and questions you can contact Raul Burgos M. Telegram account [@RaulBurgosMurray](https://t.me/RaulBurgosMurray)
 
 ## License
 
